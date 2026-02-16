@@ -5,6 +5,8 @@ const cors = require('cors');
 const crypto = require('crypto');
 
 admin.initializeApp();
+const db = admin.firestore();
+const rtdb = admin.database();
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -82,6 +84,18 @@ app.post('/auth/sync', authenticate, async (req, res) => {
                 });
             }
 
+            // SYNC TO REALTIME DB
+            await rtdb.ref(`users/${uid}`).set({
+                email,
+                subscription: {
+                    plan: 'free',
+                    status: 'active',
+                    expiresAt: expiresAt.toISOString(),
+                    isTrial: true
+                },
+                lastLogin: new Date().toISOString()
+            });
+
             res.json({
                 message: 'Usuário criado',
                 isNew: true,
@@ -117,6 +131,12 @@ app.post('/auth/sync', authenticate, async (req, res) => {
                     expiresAt: sub.expiresAt?.toDate()?.toISOString(),
                     status: sub.status
                 };
+            }
+
+            // SYNC TO REALTIME DB (Update login time)
+            await rtdb.ref(`users/${uid}/lastLogin`).set(new Date().toISOString());
+            if (subscription) {
+                await rtdb.ref(`users/${uid}/subscription`).update(subscription);
             }
 
             res.json({
@@ -244,6 +264,14 @@ app.post('/subscription/purchase', authenticate, async (req, res) => {
         batch.update(userRef, { plan: plan });
 
         await batch.commit();
+
+        // SYNC TO REALTIME DB
+        await rtdb.ref(`users/${uid}/subscription`).set({
+            plan: plan,
+            status: 'active',
+            expiresAt: expiresAt.toISOString(),
+            isTrial: false
+        });
 
         res.json({
             success: true,

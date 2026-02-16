@@ -35,53 +35,67 @@ FIREBASE_INITIALIZED = False
 db = None
 auth = None
 
-try:
-    import firebase_admin
-    from firebase_admin import credentials, firestore, auth
-    import base64
-    
-    # Credential Loading Logic:
-    # 1. Environment Variable (Best for Cloud)
-    # 2. Local JSON File (Best for Local Dev)
-    # 3. Base64 Encoded File (Bypass for quick repo deployment)
-    
-    cred = None
-    
-    # Check Env Var
-    if os.environ.get('FIREBASE_CREDENTIALS'):
-        cred_dict = json.loads(os.environ.get('FIREBASE_CREDENTIALS'))
-        cred = credentials.Certificate(cred_dict)
-        logger.info("[OK] Firebase credentials loaded from ENV")
-        
-    # Check Local JSON
-    elif Path("serviceAccountKey.json").exists():
-        cred = credentials.Certificate("serviceAccountKey.json")
-        logger.info("[OK] Firebase credentials loaded from JSON file")
-        
-    # Check Encoded File (Bypass)
-    elif Path("firebase_secret.encoded").exists():
-        try:
-            with open("firebase_secret.encoded", "r") as f:
-                b64_str = f.read().strip()
-            json_str = base64.b64decode(b64_str).decode('utf-8')
-            cred_dict = json.loads(json_str)
-            cred = credentials.Certificate(cred_dict)
-            logger.info("[OK] Firebase credentials loaded from Encoded file")
-        except Exception as e:
-            logger.error(f"Failed to decode secret: {e}")
 
-    if cred:
-        firebase_admin.initialize_app(cred)
-        db = firestore.client()
-        FIREBASE_INITIALIZED = True
-        logger.info("[OK] Firebase Admin initialized successfully!")
-    else:
-        logger.warning("[WARNING] No valid credentials found. SaaS mode disabled.")
-        
-except ImportError:
-    logger.error("[ERROR] firebase-admin not installed.")
-except Exception as e:
-    logger.error(f"[ERROR] Error initializing Firebase: {str(e)}")
+
+def initialize_firebase():
+    global FIREBASE_INITIALIZED, db, auth
+    
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, firestore, auth as firebase_auth_module
+        import base64
+        import json
+
+        cred = None
+
+        # Credential Loading Logic:
+        # 1. Local JSON File (Best for Local Dev)
+        if cred_path.exists():
+            cred = credentials.Certificate(str(cred_path))
+            logger.info("[OK] Firebase credentials loaded from JSON file")
+            
+        # 2. Environment Variable (Best for Cloud)
+        elif os.environ.get('FIREBASE_CREDENTIALS'):
+            try:
+                cred_dict = json.loads(os.environ.get('FIREBASE_CREDENTIALS'))
+                cred = credentials.Certificate(cred_dict)
+                logger.info("[OK] Firebase credentials loaded from ENV")
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to parse FIREBASE_CREDENTIALS env var: {e}")
+
+        # 3. Base64 Encoded File (Legacy/Bypass)
+        elif Path("firebase_secret.encoded").exists():
+            try:
+                with open("firebase_secret.encoded", "r") as f:
+                    b64_str = f.read().strip()
+                json_str = base64.b64decode(b64_str).decode('utf-8')
+                cred_dict = json.loads(json_str)
+                cred = credentials.Certificate(cred_dict)
+                logger.info("[OK] Firebase credentials loaded from Encoded file")
+            except Exception as e:
+                logger.error(f"Failed to decode secret: {e}")
+
+        if cred:
+            # Check if already initialized to avoid error
+            if not firebase_admin._apps:
+                firebase_admin.initialize_app(cred)
+            
+            db = firestore.client()
+            auth = firebase_auth_module 
+            FIREBASE_INITIALIZED = True
+            logger.info("[OK] Firebase Admin initialized successfully!")
+        else:
+            logger.warning("[WARNING] No valid credentials found. SaaS mode disabled.")
+            FIREBASE_INITIALIZED = False
+            
+    except ImportError:
+        logger.error("[ERROR] firebase-admin not installed. SaaS mode disabled.")
+        FIREBASE_INITIALIZED = False
+    except Exception as e:
+        logger.error(f"[ERROR] Error initializing Firebase: {str(e)}")
+        FIREBASE_INITIALIZED = False
+
+initialize_firebase()
 
 # ==================================================================================
 #  CONFIGURAÇÕES DO SERVIDOR
@@ -362,7 +376,7 @@ def compile_real_logic():
             # Compilar
             cmd = [
                 engine,
-                '-interaction=nonstopmode',
+                '-interaction=batchmode',
                 '-file-line-error',
                 '-output-directory', str(work_dir),
                 main_file
@@ -392,7 +406,14 @@ def compile_real_logic():
                 response.headers['Content-Disposition'] = f'inline; filename={pdf_filename}'
                 return response
             else:
-                log_content = result.stdout.decode('latin-1', errors='ignore')
+                # Batchmode suppresses stdout, read the log file
+                log_file = work_dir / (Path(main_file).stem + '.log')
+                if log_file.exists():
+                    with open(log_file, 'r', encoding='latin-1', errors='ignore') as f:
+                        log_content = f.read()
+                else:
+                    log_content = result.stdout.decode('latin-1', errors='ignore') or "No log file found."
+                
                 return jsonify({'error': 'Compilation failed', 'logs': log_content}), 400
                 
     except subprocess.TimeoutExpired:
@@ -408,14 +429,25 @@ def compile_real_logic():
 # ou deixamos ativo mas sem verificar auth (não recomendado para hibrido).
 # Vamos redirecionar /compile "raw" para a autenciada se tiver header.
 
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({'status': 'online', 'mode': 'hybrid-saas' if FIREBASE_INITIALIZED else 'local-legacy'})
+@app.route('/api/status', methods=['GET'])
+def server_status():
+    return jsonify({
+        'status': 'online', 
+        'mode': 'hybrid-saas' if FIREBASE_INITIALIZED else 'local-legacy',
+        'version': '2.0.0'
+    })
+
+# Add root route for health verify
+@app.route('/', methods=['GET'])
+def root_status():
+    return jsonify({'status': 'online', 'service': 'Overleaf Pro Compiler API'})
 
 if __name__ == '__main__':
-    print(f"[STARTED] Servidor Python Iniciado na porta {PORT}")
+    import os
+    port = int(os.environ.get('PORT', 8765))
+    print(f"[STARTED] Servidor Python Iniciado na porta {port}")
     if FIREBASE_INITIALIZED:
         print("[SECURE] Modo SaaS Híbrido: ATIVO (Firebase Conectado)")
     else:
         print("[WARNING] Modo SaaS Híbrido: INATIVO (Falta serviceAccountKey.json)")
-    app.run(host='0.0.0.0', port=PORT)
+    app.run(host='0.0.0.0', port=port)

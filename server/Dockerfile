@@ -1,35 +1,27 @@
-# Use Python 3.10 Slim
-FROM python:3.10-slim
+FROM python:3.9-slim
 
-# Install System Dependencies & TeX Live
-# texlive-latex-base: Minimal LaTeX
-# texlive-fonts-recommended: Standard fonts
-# texlive-latex-extra: Common packages
-# texlive-lang-portuguese: Portuguese language support
-RUN apt-get update && apt-get install -y \
+# Install TeX Live (Essential for LaTeX compilation)
+# -y means yes to prompts, --no-install-recommends to keep image smaller
+RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-latex-base \
     texlive-fonts-recommended \
+    texlive-fonts-extra \
     texlive-latex-extra \
-    texlive-lang-portuguese \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set work directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install gunicorn
 
-# Copy Application Code
+# Copy server code
 COPY . .
 
-# Expose Port
-# Render sets PORT env var automatically
-ENV PORT=8765
-EXPOSE $PORT
+# Expose port (Render uses environment variable PORT, default 8765)
+EXPOSE 8765
 
-# Start Command
-# Using 4 workers for better concurrency on free tier (if threads allow)
-# Timeout 300s for long compilations
-CMD gunicorn -w 2 -b 0.0.0.0:$PORT --timeout 300 latex_server:app
+# Run with Gunicorn for production
+# CMD ["python", "latex_server.py"] # Local dev
+CMD gunicorn --bind 0.0.0.0:$PORT latex_server:app

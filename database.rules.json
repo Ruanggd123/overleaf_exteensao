@@ -1,0 +1,14 @@
+{
+    "rules": {
+        "users": {
+            "$uid": {
+                // PERMITE LEITURA APENAS SE O USUÁRIO FOR DONO DOS DADOS
+                ".read": "auth !== null && auth.uid === $uid",
+                // BLOQUEIA TODA ESCRITA VIA CLIENTE (FRONTEND)
+                // Apenas o Backend (Admin SDK) pode escrever aqui.
+                // Isso impede que hackers alterem o plano para "unlimited" via console.
+                ".write": false
+            }
+        }
+    }
+}
