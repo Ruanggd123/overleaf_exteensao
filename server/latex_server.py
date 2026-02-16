@@ -64,7 +64,8 @@ def initialize_firebase():
         from firebase_admin import credentials, firestore, auth as firebase_auth_module
         import base64
         import json
-
+        
+        cred_path = Path("serviceAccountKey.json")
         cred = None
 
         # Credential Loading Logic:
@@ -72,6 +73,16 @@ def initialize_firebase():
         if cred_path.exists():
             cred = credentials.Certificate(str(cred_path))
             logger.info("[OK] Firebase credentials loaded from JSON file")
+            
+        # ... (rest of function logic)
+
+# ... (middle of file)
+
+# ==================================================================================
+#  ROTAS LEGADAS (v2 sem auth ou para backward compatibility)
+# ==================================================================================
+# Removida a duplicata de /api/status e / para evitar erro do Flask
+
             
         # 2. Environment Variable (Best for Cloud)
         elif os.environ.get('FIREBASE_CREDENTIALS'):
@@ -448,18 +459,8 @@ def compile_real_logic():
 # ou deixamos ativo mas sem verificar auth (não recomendado para hibrido).
 # Vamos redirecionar /compile "raw" para a autenciada se tiver header.
 
-@app.route('/api/status', methods=['GET'])
-def server_status():
-    return jsonify({
-        'status': 'online', 
-        'mode': 'hybrid-saas' if FIREBASE_INITIALIZED else 'local-legacy',
-        'version': '2.0.0'
-    })
+# Duplicatas removidas.
 
-# Add root route for health verify
-@app.route('/', methods=['GET'])
-def root_status():
-    return jsonify({'status': 'online', 'service': 'Overleaf Pro Compiler API'})
 
 if __name__ == '__main__':
     import os
