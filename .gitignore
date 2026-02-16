@@ -20,3 +20,4 @@ node_modules/
 server/serviceAccountKey.json
 server/projects_cache/
 server/temp_pdfs/
+server/firebase_secret.encoded

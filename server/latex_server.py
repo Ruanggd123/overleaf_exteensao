@@ -56,7 +56,7 @@ try:
     # Check Local JSON
     elif Path("serviceAccountKey.json").exists():
         cred = credentials.Certificate("serviceAccountKey.json")
-        logger.info("✅ Firebase credentials loaded from JSON file")
+        logger.info("[OK] Firebase credentials loaded from JSON file")
         
     # Check Encoded File (Bypass)
     elif Path("firebase_secret.encoded").exists():
@@ -74,14 +74,14 @@ try:
         firebase_admin.initialize_app(cred)
         db = firestore.client()
         FIREBASE_INITIALIZED = True
-        logger.info("✅ Firebase Admin initialized successfully!")
+        logger.info("[OK] Firebase Admin initialized successfully!")
     else:
-        logger.warning("⚠️ No valid credentials found. SaaS mode disabled.")
+        logger.warning("[WARNING] No valid credentials found. SaaS mode disabled.")
         
 except ImportError:
-    logger.error("❌ firebase-admin not installed.")
+    logger.error("[ERROR] firebase-admin not installed.")
 except Exception as e:
-    logger.error(f"❌ Error initializing Firebase: {str(e)}")
+    logger.error(f"[ERROR] Error initializing Firebase: {str(e)}")
 
 # ==================================================================================
 #  CONFIGURAÇÕES DO SERVIDOR
@@ -413,9 +413,9 @@ def health():
     return jsonify({'status': 'online', 'mode': 'hybrid-saas' if FIREBASE_INITIALIZED else 'local-legacy'})
 
 if __name__ == '__main__':
-    print(f"🚀 Servidor Python Iniciado na porta {PORT}")
+    print(f"[STARTED] Servidor Python Iniciado na porta {PORT}")
     if FIREBASE_INITIALIZED:
-        print("🔒 Modo SaaS Híbrido: ATIVO (Firebase Conectado)")
+        print("[SECURE] Modo SaaS Híbrido: ATIVO (Firebase Conectado)")
     else:
-        print("⚠️ Modo SaaS Híbrido: INATIVO (Falta serviceAccountKey.json)")
+        print("[WARNING] Modo SaaS Híbrido: INATIVO (Falta serviceAccountKey.json)")
     app.run(host='0.0.0.0', port=PORT)
