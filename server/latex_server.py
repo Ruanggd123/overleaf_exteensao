@@ -3,6 +3,7 @@ import sys
 import subprocess
 import tempfile
 import shutil
+import uuid
 import logging
 import json
 import time
@@ -11,22 +12,40 @@ import io
 import traceback
 import threading
 from pathlib import Path
-from flask import Flask, request, jsonify, send_file, make_response
+import requests
+import firebase_admin
+from firebase_admin import credentials, auth, db
+from flask import Flask, request, jsonify, send_file, render_template, make_response
 from flask_cors import CORS
 
 # Configuração de Logs
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("server.log"),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+# Inicializar Flask
+app = Flask(__name__, template_folder='templates')
 CORS(app)
+
+# ==================================================================================
+#  ROUTES
+# ==================================================================================
+
+@app.route('/register', methods=['GET'])
+def register_page():
+    return render_template('register.html')
+
+@app.route('/api/status', methods=['GET'])
+def server_status():
+    return jsonify({
+        'status': 'online', 
+        'mode': 'hybrid-saas',
+        'version': '2.1.0'
+    })
+
+@app.route('/', methods=['GET'])
+def root_status():
+    return jsonify({'message': 'Overleaf Pro Server Running'})
+
 
 # ==================================================================================
 #  FIREBASE ADMIN SETUP (SaaS Logic Local)

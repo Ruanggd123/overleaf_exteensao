@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Criar Conta - Overleaf Pro</title>
+    <!-- Firebase Compat SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2rem;
+            border-radius: 1rem;
+            width: 100%;
+            max-width: 400px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        h2 {
+            margin-bottom: 1.5rem;
+            color: #10b981;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #334155;
+            background: #0f172a;
+            color: white;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #059669;
+        }
+
+        .message {
+            margin-top: 15px;
+            font-size: 0.9rem;
+        }
+
+        .success {
+            color: #4ade80;
+        }
+
+        .error {
+            color: #f87171;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h2>Criar Conta Overleaf Pro</h2>
+        <div id="register-form">
+            <input type="email" id="email" placeholder="Seu Email" required>
+            <input type="password" id="password" placeholder="Sua Senha (min. 6 caracteres)" required>
+            <button onclick="register()">Criar Conta</button>
+        </div>
+        <div id="message" class="message"></div>
+    </div>
+
+    <script>
+        // CONFIGURAÇÃO FIREBASE - SUBSTITUA PELAS SUAS CHAVES SE NECESSÁRIO
+        // (Usando as chaves públicas que já estão no projeto)
+        const firebaseConfig = {
+            apiKey: "AIzaSyChPjBPB22ozjA5X9CYn7gkprLHM68TT7g",
+            authDomain: "extensao-asdsadas1q.firebaseapp.com",
+            projectId: "extensao-asdsadas1q"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+
+        function register() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const msg = document.getElementById('message');
+
+            if (password.length < 6) {
+                msg.textContent = "A senha deve ter pelo menos 6 caracteres.";
+                msg.className = "message error";
+                return;
+            }
+
+            msg.textContent = "Criando conta...";
+            msg.className = "message";
+
+            auth.createUserWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    msg.innerHTML = "✅ Conta criada com sucesso!<br>Você já pode fazer login na extensão.";
+                    msg.className = "message success";
+                    document.getElementById('register-form').style.display = 'none';
+                })
+                .catch((error) => {
+                    let text = error.message;
+                    if (error.code === 'auth/email-already-in-use') text = "Este email já está em uso.";
+                    if (error.code === 'auth/invalid-email') text = "Email inválido.";
+                    msg.textContent = "Erro: " + text;
+                    msg.className = "message error";
+                });
+        }
+    </script>
+</body>
+
+</html>

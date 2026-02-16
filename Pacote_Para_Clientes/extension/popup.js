@@ -124,19 +124,44 @@
     }
 
     // ═════════════════════════════════════════════════════════════════
-    //  AUTENTICAÇÃO
+    //  AUTENTICAÇÃO (EMAIL/SENHA)
     // ═════════════════════════════════════════════════════════════════
 
-    async function signInWithGoogle() {
+    async function signInWithEmail() {
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        const btnLogin = document.getElementById('btn-login');
+
+        if (!email || !password) {
+            showToast('Preencha email e senha', 'error');
+            return;
+        }
+
         try {
-            const provider = new firebase.auth.GoogleAuthProvider();
-            const result = await auth.signInWithPopup(provider);
+            btnLogin.textContent = 'Entrando...';
+            btnLogin.disabled = true;
+
+            const result = await auth.signInWithEmailAndPassword(email, password);
             await syncUserWithBackend(result.user);
+
+            showToast('Login realizado!', 'success');
         } catch (error) {
-            console.error('Google sign in error:', error);
-            showToast('Erro ao fazer login com Google: ' + error.message, 'error');
+            console.error('Login error:', error);
+            let msg = 'Erro ao entrar.';
+            if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') msg = 'Email ou senha incorretos.';
+            if (error.code === 'auth/invalid-email') msg = 'Email inválido.';
+            showToast(msg, 'error');
+        } finally {
+            btnLogin.textContent = 'Entrar';
+            btnLogin.disabled = false;
         }
     }
+
+    function openRegisterPage() {
+        // Opens the server hosted registration page
+        chrome.tabs.create({ url: `${API_BASE_URL.replace('/api', '')}/register` });
+    }
+
 
     async function syncUserWithBackend(firebaseUser) {
         try {
@@ -303,7 +328,11 @@
             }
         });
 
-        document.getElementById('btn-google').addEventListener('click', signInWithGoogle);
+        document.getElementById('btn-login').addEventListener('click', signInWithEmail);
+        document.getElementById('link-register').addEventListener('click', (e) => {
+            e.preventDefault();
+            openRegisterPage();
+        });
 
         const toggle = document.getElementById('ext-toggle');
         if (toggle) {
