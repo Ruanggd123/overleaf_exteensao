@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+env/
+venv/
+.env
+
+# MacOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Node
+node_modules/
+
+# Server specifics
+server/serviceAccountKey.json
+server/projects_cache/
+server/temp_pdfs/

@@ -1,0 +1,3 @@
+flask-cors>=4.0
+firebase-admin
+gunicorn

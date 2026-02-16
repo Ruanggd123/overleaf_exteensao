@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Função para verificar se usuário está autenticado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Função para verificar se é o próprio usuário
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Função para verificar admin (você pode adicionar UIDs admin aqui)
+    function isAdmin() {
+      return isAuthenticated() && 
+        request.auth.token.email in ['admin@example.com']; // Replace with real admin email
+    }
+    
+    // Coleção de usuários - só pode ler/escrever próprio documento
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId) || isAdmin();
+      
+      // Subcoleção de dispositivos (hardware fingerprint)
+      match /devices/{deviceId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+    
+    // Coleção de assinaturas - só pode ler própria, admin escreve
+    match /subscriptions/{subId} {
+      allow read: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update: if isAdmin();
+    }
+    
+    // Coleção de uso diário
+    match /dailyUsage/{docId} {
+      allow read: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+    }
+    
+    // Logs de compilação (apenas criação própria)
+    match /compileLogs/{logId} {
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+    }
+  }
+}
