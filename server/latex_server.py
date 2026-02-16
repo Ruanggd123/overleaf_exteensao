@@ -61,7 +61,7 @@ def initialize_firebase():
     
     try:
         import firebase_admin
-        from firebase_admin import credentials, firestore, auth as firebase_auth_module
+        from firebase_admin import credentials, auth as firebase_auth_module, db as rtdb_module
         import base64
         import json
         
@@ -73,16 +73,6 @@ def initialize_firebase():
         if cred_path.exists():
             cred = credentials.Certificate(str(cred_path))
             logger.info("[OK] Firebase credentials loaded from JSON file")
-            
-        # ... (rest of function logic)
-
-# ... (middle of file)
-
-# ==================================================================================
-#  ROTAS LEGADAS (v2 sem auth ou para backward compatibility)
-# ==================================================================================
-# Removida a duplicata de /api/status e / para evitar erro do Flask
-
             
         # 2. Environment Variable (Best for Cloud)
         elif os.environ.get('FIREBASE_CREDENTIALS'):
@@ -108,12 +98,14 @@ def initialize_firebase():
         if cred:
             # Check if already initialized to avoid error
             if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred)
+                firebase_admin.initialize_app(cred, {
+                    'databaseURL': 'https://extensao-asdsadas1q-default-rtdb.firebaseio.com'
+                })
             
-            db = firestore.client()
+            db = rtdb_module # Usando Realtime Database
             auth = firebase_auth_module 
             FIREBASE_INITIALIZED = True
-            logger.info("[OK] Firebase Admin initialized successfully!")
+            logger.info("[OK] Firebase Admin (RTDB) initialized successfully!")
         else:
             logger.warning("[WARNING] No valid credentials found. SaaS mode disabled.")
             FIREBASE_INITIALIZED = False
@@ -172,26 +164,19 @@ def check_auth(f):
     return wrapper
 
 def get_user_subscription(uid):
-    """Busca assinatura ativa do Firestore."""
+    """Busca assinatura ativa do RTDB."""
     try:
-        # Busca assinatura
-        subs_ref = db.collection('subscriptions')
-        query = subs_ref.where('userId', '==', uid)\
-                        .where('status', '==', 'active')\
-                        .order_by('expiresAt', direction=firestore.Query.DESCENDING)\
-                        .limit(1)
-        docs = list(query.stream())
+        # Estrutura simplificada: users/{uid}/subscription
+        ref = db.reference(f'users/{uid}/subscription')
+        sub_data = ref.get()
         
-        sub_data = {'plan': 'free', 'status': 'expired'}
-        if docs:
-            d = docs[0].to_dict()
-            sub_data = {
-                'plan': d.get('plan', 'free'),
-                'status': d.get('status'),
-                'expiresAt': d.get('expiresAt')
-            }
-            
-        return sub_data
+        if sub_data and sub_data.get('status') == 'active':
+             # Check expiration
+             expires_at = sub_data.get('expiresAt')
+             # Simple checking if needed, or trust DB
+             return sub_data
+
+        return {'plan': 'free', 'status': 'expired'}
     except Exception as e:
         logger.error(f"Erro ao buscar assinatura: {e}")
         return {'plan': 'free', 'status': 'error'}
@@ -202,12 +187,12 @@ def check_daily_limit(uid, plan_name):
         today = time.strftime('%Y-%m-%d')
         limit = PLANS.get(plan_name, PLANS['free'])['compilationsPerDay']
         
-        usage_ref = db.collection('dailyUsage').document(f"{uid}_{today}")
-        usage_doc = usage_ref.get()
+        ref = db.reference(f'dailyUsage/{uid}_{today}')
+        usage_data = ref.get()
         
         current_usage = 0
-        if usage_doc.exists:
-            current_usage = usage_doc.to_dict().get('count', 0)
+        if usage_data:
+            current_usage = usage_data.get('count', 0)
         
         if current_usage >= limit:
             return False, limit, current_usage
@@ -222,14 +207,17 @@ def increment_usage(uid):
     """Incrementa contador de uso."""
     try:
         today = time.strftime('%Y-%m-%d')
-        usage_ref = db.collection('dailyUsage').document(f"{uid}_{today}")
-        # Set com merge para criar se não existir
-        usage_ref.set({
-            'userId': uid,
-            'date': today,
-            'count': firestore.INCREMENT(1),
-            'lastUsed': firestore.SERVER_TIMESTAMP
-        }, merge=True)
+        ref = db.reference(f'dailyUsage/{uid}_{today}')
+        
+        # Transactional increment
+        def increment_tx(current_val):
+            if current_val is None:
+                return {'count': 1, 'date': today, 'userId': uid, 'lastUsed': int(time.time() * 1000)}
+            current_val['count'] = (current_val.get('count', 0) + 1)
+            current_val['lastUsed'] = int(time.time() * 1000)
+            return current_val
+
+        ref.transaction(increment_tx)
     except Exception as e:
         logger.error(f"Erro ao incrementar uso: {e}")
 
@@ -247,34 +235,34 @@ def api_auth_sync():
         data = request.json or {}
         hardware_id = data.get('hardwareId')
         
-        user_ref = db.collection('users').document(uid)
-        user_doc = user_ref.get()
+        user_ref = db.reference(f'users/{uid}')
+        user_data = user_ref.get()
         
         is_new = False
-        if not user_doc.exists:
+        if not user_data:
             is_new = True
-            # Criar usuário
+            
+            # Setup Trial Dates
+            from datetime import datetime, timedelta
+            expires = (datetime.utcnow() + timedelta(days=1)).isoformat()
+            
+            # Create User + Subscription Atomically
             user_ref.set({
                 'email': email,
                 'plan': 'free',
-                'createdAt': firestore.SERVER_TIMESTAMP,
-                'lastLogin': firestore.SERVER_TIMESTAMP,
-                'hardwareFingerprint': hardware_id
-            })
-            
-            # Criar Trial
-            from datetime import datetime, timedelta
-            expires = datetime.utcnow() + timedelta(days=1)
-            db.collection('subscriptions').add({
-                'userId': uid,
-                'plan': 'free',
-                'status': 'active',
-                'isTrial': True,
-                'startedAt': firestore.SERVER_TIMESTAMP,
-                'expiresAt': expires
+                'createdAt': int(time.time() * 1000),
+                'lastLogin': int(time.time() * 1000),
+                'hardwareFingerprint': hardware_id,
+                'subscription': {
+                    'plan': 'free',
+                    'status': 'active',
+                    'isTrial': True,
+                    'startedAt': int(time.time() * 1000),
+                    'expiresAt': expires
+                }
             })
         else:
-            user_ref.update({'lastLogin': firestore.SERVER_TIMESTAMP})
+            user_ref.update({'lastLogin': int(time.time() * 1000)})
             
         return jsonify({'message': 'Sincronizado', 'isNew': is_new})
         
@@ -288,12 +276,13 @@ def api_user_me():
     """Retorna dados do usuário e limtes."""
     try:
         uid = request.user['uid']
-        user_doc = db.collection('users').document(uid).get()
-        if not user_doc.exists:
+        user_ref = db.reference(f'users/{uid}')
+        user_data = user_ref.get()
+        
+        if not user_data:
             return jsonify({'error': 'Usuário não encontrado'}), 404
             
-        user_data = user_doc.to_dict()
-        sub = get_user_subscription(uid)
+        sub = user_data.get('subscription', {'plan': 'free', 'status': 'expired'})
         plan = sub.get('plan', 'free')
         
         allowed, limit, used = check_daily_limit(uid, plan)
@@ -320,31 +309,29 @@ def api_purchase():
         uid = request.user['uid']
         plan = request.json.get('plan', 'pro')
         
-        # Desativa anteriores
-        old_subs = db.collection('subscriptions')\
-                     .where('userId', '==', uid)\
-                     .where('status', '==', 'active').get()
-        for doc in old_subs:
-            doc.reference.update({'status': 'cancelled'})
-            
-        # Cria nova
+        # Lógica de Compra:
+        # Atualiza diretamente o nó subscription do usuário
+        
         from datetime import datetime, timedelta
-        expires = datetime.utcnow() + timedelta(days=30)
+        expires = (datetime.utcnow() + timedelta(days=30)).isoformat()
         
-        db.collection('subscriptions').add({
-            'userId': uid,
+        user_ref = db.reference(f'users/{uid}')
+        
+        # Atualiza plano no root do usuário e no obj subscription
+        user_ref.update({
             'plan': plan,
-            'status': 'active',
-            'startedAt': firestore.SERVER_TIMESTAMP,
-            'expiresAt': expires,
-            'paymentMethod': 'simulated_local'
+            'subscription': {
+                'plan': plan,
+                'status': 'active', # Auto-aprovado!
+                'startedAt': int(time.time() * 1000),
+                'expiresAt': expires,
+                'paymentMethod': 'simulated_local'
+            }
         })
-        
-        db.collection('users').document(uid).update({'plan': plan})
         
         return jsonify({
             'success': True, 
-            'message': f'Plano {plan} ativado (Simulação Local)!'
+            'message': f'Plano {plan} ativado (Auto-Aprovado)!'
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
