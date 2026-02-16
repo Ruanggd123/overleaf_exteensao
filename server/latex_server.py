@@ -51,7 +51,7 @@ try:
     if os.environ.get('FIREBASE_CREDENTIALS'):
         cred_dict = json.loads(os.environ.get('FIREBASE_CREDENTIALS'))
         cred = credentials.Certificate(cred_dict)
-        logger.info("✅ Firebase credentials loaded from ENV")
+        logger.info("[OK] Firebase credentials loaded from ENV")
         
     # Check Local JSON
     elif Path("serviceAccountKey.json").exists():
@@ -66,7 +66,7 @@ try:
             json_str = base64.b64decode(b64_str).decode('utf-8')
             cred_dict = json.loads(json_str)
             cred = credentials.Certificate(cred_dict)
-            logger.info("✅ Firebase credentials loaded from Encoded file")
+            logger.info("[OK] Firebase credentials loaded from Encoded file")
         except Exception as e:
             logger.error(f"Failed to decode secret: {e}")
 
