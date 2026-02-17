@@ -1,7 +1,7 @@
 // background.js — Overleaf Local Compiler Service Worker
 // Orchestrates compilation requests between content script and local server.
 
-const DEFAULT_SERVER = 'http://localhost:8765';
+const DEFAULT_SERVER = 'https://meu-latex-server.onrender.com';
 
 /**
  * Get the configured server URL from storage.

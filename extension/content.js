@@ -48,7 +48,13 @@
             // Sync auth state and settings
             chrome.storage.local.get(['authToken', 'apiUrl'], async (result) => {
                 this.authToken = result.authToken;
-                if (result.apiUrl) this.apiUrl = result.apiUrl;
+                if (result.apiUrl && !result.apiUrl.includes('localhost')) {
+                    this.apiUrl = result.apiUrl;
+                } else if (result.apiUrl && result.apiUrl.includes('localhost')) {
+                    console.warn('[OLC] Ignoring localhost config from storage, using default cloud URL.');
+                    // Optional: clear it
+                    chrome.storage.local.remove('apiUrl');
+                }
 
                 console.log('[OLC] Using API:', this.apiUrl);
 
@@ -114,7 +120,9 @@
             const toolbar = document.querySelector('.toolbar-pdf') || document.querySelector('.toolbar-header-right');
             if (!toolbar) return;
 
-            if (document.getElementById('olc-cloud-btn')) return;
+            // Remove existing button if any to avoid duplicates/stale state
+            const existingBtn = document.getElementById('olc-cloud-btn');
+            if (existingBtn) existingBtn.remove();
 
             const btn = document.createElement('button');
             btn.id = 'olc-cloud-btn';
@@ -123,9 +131,34 @@
             btn.style.height = '100%';
             btn.innerHTML = locked ? '🔒 Login Extensão' : '⚡ Cloud Compile';
 
-            btn.onclick = () => {
+            btn.onclick = async () => {
                 if (locked) {
-                    alert('Abra a extensão, faça login e verifique sua assinatura.');
+                    btn.innerHTML = '🔄 Verificando...';
+                    btn.disabled = true;
+
+                    // Force refresh auth token from storage
+                    const result = await new Promise(r => chrome.storage.local.get(['authToken'], r));
+                    this.authToken = result.authToken;
+
+                    if (!this.authToken) {
+                        alert('Você não está logado na extensão.\n\n1. Abra a extensão (clique no ícone 📄).\n2. Faça login.\n3. Tente novamente.');
+                        btn.innerHTML = '🔒 Login Extensão';
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    const hasAccess = await this.checkSubscription();
+                    if (hasAccess) {
+                        // Unlock and compile!
+                        btn.innerHTML = '⚡ Cloud Compile';
+                        btn.disabled = false;
+                        locked = false; // Persistent unlock for this session
+                        this.compile();
+                    } else {
+                        alert('Assinatura não encontrada ou expirada.\nVerifique seu status na extensão.');
+                        btn.innerHTML = '🔒 Login Extensão';
+                        btn.disabled = false;
+                    }
                 } else {
                     this.compile();
                 }
