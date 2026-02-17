@@ -1,3 +1,5 @@
+flask>=2.0
 flask-cors>=4.0
-firebase-admin
+firebase-admin>=6.0
 gunicorn
+requests

@@ -1,6 +1,6 @@
 @echo off
-title Servidor Overleaf Pro
-echo Iniciando Servidor Local de Compilacao...
-cd /d "%~dp0"
-python latex_server.py
+echo Installing dependencies...
+call npm install
+echo Starting local server...
+node server.js
 pause

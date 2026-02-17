@@ -29,7 +29,7 @@
 
     class OverleafCloudCompiler {
         constructor() {
-            this.defaultApiUrl = 'https://meu-latex-server.onrender.com/api';
+            this.defaultApiUrl = 'http://localhost:8765/api';
             this.apiUrl = this.defaultApiUrl;
             this.init();
             console.log('[OLC] Cloud Compiler initialized');

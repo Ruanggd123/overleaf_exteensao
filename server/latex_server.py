@@ -39,8 +39,8 @@ def register_page():
 def server_status():
     return jsonify({
         'status': 'online', 
-        'mode': 'hybrid-saas',
-        'version': '2.1.0'
+        'mode': 'hybrid-saas' if FIREBASE_INITIALIZED else 'offline-local',
+        'version': '2.2.0'
     })
 
 @app.route('/', methods=['GET'])
@@ -108,7 +108,7 @@ def initialize_firebase():
             FIREBASE_INITIALIZED = True
             logger.info("[OK] Firebase Admin (RTDB) initialized successfully!")
         else:
-            logger.warning("[WARNING] No valid credentials found. SaaS mode disabled.")
+            logger.warning("[WARNING] No valid credentials found. Switching to OFFLINE MODE (No Auth/Credits).")
             FIREBASE_INITIALIZED = False
             
     except ImportError:
@@ -128,11 +128,6 @@ COMPILE_TIMEOUT = int(os.environ.get('COMPILE_TIMEOUT', 300))
 MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 PROJECTS_CACHE_DIR = Path("projects_cache")
-# ==================================================================================
-#  SISTEMA DE CRÉDITOS (NOVO)
-# ==================================================================================
-
-# Planos movidos para cima
 
 # ==================================================================================
 #  SISTEMA DE CRÉDITOS (NOVO)
@@ -153,8 +148,13 @@ PLANS = {
 def check_auth(f):
     """Decorator para verificar JWT do Firebase em endpoints protegidos."""
     def wrapper(*args, **kwargs):
+        # --- OFFLINE/LOCAL DEV MODE ---
         if not FIREBASE_INITIALIZED:
-            return jsonify({'error': 'Servidor não configurado para SaaS (falta serviceAccountKey.json)'}), 503
+            # Bypass auth check completely for local dev
+            logger.info("Bypassing auth check (Offline Mode)")
+            request.user = {'uid': 'local_dev_user', 'email': 'local@dev.com'}
+            return f(*args, **kwargs)
+        # ------------------------------
         
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
@@ -210,6 +210,9 @@ def get_user_credits(uid):
 
 def consume_credit(uid):
     """Consome 1 crédito. Retorna True se sucesso, False se sem saldo."""
+    if not FIREBASE_INITIALIZED:
+        return True, 999999 # Always succeed in offline mode
+
     try:
         ref = db.reference(f'users/{uid}/credits')
         
@@ -221,13 +224,6 @@ def consume_credit(uid):
                 return current_val - 1
             else:
                 return -1 # Sinal de sem crédito (abort transaction logic custom)
-        
-        # A transação retorna o novo valor, mas aqui simplifico
-        # Se retornar -1, é pq não tinha. Mas transaction update atomicamente.
-        
-        # Melhor abordagem com transaction result
-        # Mas o Python Client do Firebase Admin é chato com abort
-        # Vamos fazer check-and-set otimista simples para este MVP
         
         current = ref.get()
         if current is None:
@@ -252,6 +248,11 @@ def consume_credit(uid):
 def api_auth_sync():
     """Sincroniza usuário e cria trial se necessário."""
     try:
+        # --- OFFLINE MODE ---
+        if not FIREBASE_INITIALIZED:
+           return jsonify({'message': 'Sincronizado (Offline Mock)', 'isNew': False})
+        # --------------------
+
         uid = request.user['uid']
         email = request.user.get('email')
         data = request.json or {}
@@ -298,6 +299,21 @@ def api_auth_sync():
 def api_user_me():
     """Retorna dados do usuário e créditos."""
     try:
+        # --- OFFLINE MODE ---
+        if not FIREBASE_INITIALIZED:
+             return jsonify({
+                'user': {'email': 'local@dev.com'},
+                'subscription': {
+                    'plan': 'local-dev',
+                    'status': 'active',
+                    'credits': 999999,
+                    'dailyLimit': 999999,
+                    'dailyUsed': 0,
+                    'dailyRemaining': 999999
+                }
+            })
+        # --------------------
+
         uid = request.user['uid']
         user_ref = db.reference(f'users/{uid}')
         user_data = user_ref.get()
@@ -332,11 +348,11 @@ def api_user_me():
 def api_purchase():
     """Simula compra de pacotes de créditos/plano."""
     try:
+        if not FIREBASE_INITIALIZED:
+            return jsonify({'success': True, 'message': 'Offline Mock Purchase'})
+
         uid = request.user['uid']
         plan = request.json.get('plan', 'pro')
-        
-        # Lógica de Compra:
-        # Adiciona créditos ao saldo atual
         
         credits_to_add = PLANS.get(plan, PLANS['free'])['initialCredits']
         
@@ -372,7 +388,7 @@ def api_compile():
     """API de Compilação Protegida (SaaS) com Créditos."""
     uid = request.user['uid']
     
-    # 1. Tentar Consumir Crédito
+    # 1. Tentar Consumir Crédito (ignorado se offline)
     success, new_balance = consume_credit(uid)
     
     if not success:
@@ -382,7 +398,6 @@ def api_compile():
         }), 403
         
     # 2. Encaminhar para lógica real de compilação
-    # Como já estamos no servidor Python, chamamos a função local!
     return compile_real_logic()
 
 @app.route('/api/sync', methods=['POST'])
@@ -446,7 +461,7 @@ def api_sync_files():
 # ==================================================================================
 
 def compile_real_logic():
-    """Lógica original de compilação refatorada para ser chamada pela rota."""
+    """Lógica ROBUSTA de compilação (BibTeX + Multi-pass) integrada à API."""
     try:
         # Check if JSON or Form Data
         is_json = request.is_json
@@ -465,23 +480,22 @@ def compile_real_logic():
             engine = data.get('engine', 'pdflatex')
             project_id = data.get('projectId', 'temp_project')
         else:
-            # Fallback for Form Data (Zip) - Legacy or backup
+            # Fallback for Form Data
             if 'source_zip' in request.files:
-                # We won't implement ZIP here perfectly to keep it simple as user wants JSON
-                # But let's raise error if no JSON and no ZIP handling logic fully implemented
-                return jsonify({'error': 'Please use JSON format with individual files (Smart Sync). ZIP upload is deprecated in this mode.'}), 415
+                return jsonify({'error': 'Please use JSON format with individual files. ZIP upload is deprecated in this mode.'}), 415
             
-            # If form data has manual files (not implemented in client yet)
             data = request.form
             main_file = data.get('mainFile', 'main.tex')
             engine = data.get('engine', 'pdflatex')
 
+        # Use temp directory for compilation
         with tempfile.TemporaryDirectory() as temp_dir:
             work_dir = Path(temp_dir)
             
             # 1. Write Text Files
             for filename, content in files_data.items():
                 file_path = work_dir / filename
+                if file_path.is_absolute(): continue
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(content)
@@ -489,6 +503,7 @@ def compile_real_logic():
             # 2. Write Binary Files
             for filename, b64_content in binary_files_data.items():
                 file_path = work_dir / filename
+                if file_path.is_absolute(): continue
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     if ',' in b64_content:
@@ -500,7 +515,7 @@ def compile_real_logic():
 
             # 3. Ensure we have a main file
             if not (work_dir / main_file).exists():
-                 # Try to auto-detect
+                 # Auto-detect
                  tex_files = list(work_dir.glob('**/*.tex'))
                  found = False
                  for tex_file in tex_files:
@@ -513,90 +528,121 @@ def compile_real_logic():
                      except:
                          pass
                  
-                 if not found:
-                     return jsonify({'error': f'Main file "{main_file}" not found in project and auto-detection failed.'}), 400
+                 if not found and tex_files:
+                      main_file = str(tex_files[0].relative_to(work_dir))
+                      found = True
 
-            # Run LaTeX
-            pdf_filename = Path(main_file).stem + '.pdf'
+                 if not found:
+                     return jsonify({'error': f'Main file "{main_file}" not found and auto-detection failed.'}), 400
+
+            # 4. Compilation Pipeline
+            full_log = ""
             
-            # Helper to run command
-            def run_latex():
-                cmd = [
-                    engine,
-                    '-interaction=batchmode',
-                    '-file-line-error',
-                    '-output-directory', str(work_dir),
-                    main_file
-                ]
-                # MiKTeX auto-install check
-                if os.name == 'nt':
-                     # On Windows, sometimes we need to ensure PATH or env 
-                     # For now, let's just run it. 
-                     # removed -enable-installer to avoid interactive prompts hanging
-                     pass
-                     
-                return subprocess.run(
-                    cmd,
+            # Setup Command
+            base_cmd = [
+                engine,
+                '-interaction=nonstopmode',
+                '-file-line-error',
+                '-output-directory', str(work_dir),
+                main_file
+            ]
+            
+            if os.name == 'nt':
+                 # Avoid interactive prompts on Windows
+                 os.environ['MIKTEX_ENABLEINSTALLER'] = 't' # Try to auto-install packages
+
+            logger.info(f"Compiling {main_file} with {engine}...")
+
+            # --- Pass 1 ---
+            try:
+                r1 = subprocess.run(
+                    base_cmd,
                     cwd=str(work_dir),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    timeout=COMPILE_TIMEOUT
+                    timeout=COMPILE_TIMEOUT,
+                    encoding='latin-1', errors='replace' # Use latin-1 for broad compatibility
                 )
+                full_log += f"--- Pass 1 ---\n{r1.stdout}\n{r1.stderr}\n"
+            except subprocess.TimeoutExpired:
+                 return jsonify({'error': 'Compilation timed out (Pass 1)'}), 408
 
-
-            # Run twice for references (bibtex handling could be added here)
-            result = run_latex()
-            
-            # Simple BibTeX handling: if .aux exists, try running bibtex
+            # --- Check BibTeX ---
             aux_file = work_dir / (Path(main_file).stem + '.aux')
+            needs_bib = False
             if aux_file.exists():
-                subprocess.run(['bibtex', Path(main_file).stem], cwd=str(work_dir), timeout=10)
-                run_latex() # Re-run latex after bibtex
-                result = run_latex() # Final run
+                try:
+                    aux_content = aux_file.read_text(encoding='latin-1', errors='ignore')
+                    if '\\citation' in aux_content or '\\bibdata' in aux_content:
+                        needs_bib = True
+                except: pass
 
+            if needs_bib:
+                logger.info("Running BibTeX...")
+                try:
+                    rb = subprocess.run(
+                        ['bibtex', Path(main_file).stem],
+                        cwd=str(work_dir),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=30,
+                        encoding='latin-1', errors='replace'
+                    )
+                    full_log += f"--- BibTeX ---\n{rb.stdout}\n{rb.stderr}\n"
+                except FileNotFoundError:
+                    full_log += "\n[WARN] BibTeX not found/installed.\n"
+                except Exception as e:
+                    full_log += f"\n[WARN] BibTeX error: {e}\n"
+
+            # --- Pass 2 & 3 (if needed) ---
+            # We always run at least one more pass if we ran bibtex, or if requested
+            # For robustness, let's run Pass 2 always, and Pass 3 if "Rerun" in logs
+            
+            logger.info("Running Pass 2...")
+            r2 = subprocess.run(
+                base_cmd,
+                cwd=str(work_dir),
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                timeout=COMPILE_TIMEOUT,
+                encoding='latin-1', errors='replace'
+            )
+            full_log += f"--- Pass 2 ---\n{r2.stdout}\n{r2.stderr}\n"
+
+            # Check for Rerun
+            if 'Rerun to get cross-references right' in r2.stdout or 'There were undefined references' in r2.stdout:
+                logger.info("Running Pass 3 (Rerun requested)...")
+                r3 = subprocess.run(
+                    base_cmd,
+                    cwd=str(work_dir),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=COMPILE_TIMEOUT,
+                    encoding='latin-1', errors='replace'
+                )
+                full_log += f"--- Pass 3 ---\n{r3.stdout}\n{r3.stderr}\n"
+
+            # 5. Return Result
+            pdf_filename = Path(main_file).stem + '.pdf'
             pdf_path = work_dir / pdf_filename
 
             if pdf_path.exists():
-                # Read PDF logs just in case or for debug
-                with open(pdf_path, 'rb') as f:
-                    pdf_data = f.read()
-                
-                # Update stats (async/fire-and-forget ideally, but here sync is fine)
-                # update_usage_stats(user_id) 
-
                 return send_file(
-                    io.BytesIO(pdf_data),
+                    io.BytesIO(pdf_path.read_bytes()),
                     mimetype='application/pdf',
                     as_attachment=True,
                     download_name='output.pdf'
                 )
             else:
-                # Look for log file
-                log_file = work_dir / (Path(main_file).stem + '.log')
-                log_content = ""
-                if log_file.exists():
-                    with open(log_file, 'r', encoding='latin-1', errors='ignore') as f:
-                        log_content = f.read()
-                else:
-                    log_content = result.stdout.decode('latin-1', errors='ignore') + "\n" + result.stderr.decode('latin-1', errors='ignore')
-                
-                return jsonify({'error': 'Compilation failed', 'logs': log_content}), 400
+                return jsonify({'error': 'Compilation failed (No PDF generated)', 'logs': full_log}), 400
 
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Compilation timed out'}), 408
     except Exception as e:
-        print(f"Server Error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Server Error: {e}")
+        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
 
 # ==================================================================================
 #  ROTAS LEGADAS (v2 sem auth ou para backward compatibility)
 # ==================================================================================
-# Para simplificar, desativaremos o /compile antigo se o modo SaaS estiver on,
-# ou deixamos ativo mas sem verificar auth (não recomendado para hibrido).
-# Vamos redirecionar /compile "raw" para a autenciada se tiver header.
-
-# Duplicatas removidas.
-
 
 if __name__ == '__main__':
     import os

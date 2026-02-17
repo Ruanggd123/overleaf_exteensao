@@ -14,7 +14,7 @@
         measurementId: "G-8MEMV5HNM6"
     };
 
-    const DEFAULT_API_URL = 'https://meu-latex-server.onrender.com/api';
+    const DEFAULT_API_URL = 'http://localhost:8765/api';
     let API_BASE_URL = DEFAULT_API_URL;
 
     // Initial Connection Check with Timeout
