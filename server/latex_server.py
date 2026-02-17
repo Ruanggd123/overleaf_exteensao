@@ -17,6 +17,7 @@ import firebase_admin
 from firebase_admin import credentials, auth, db
 from flask import Flask, request, jsonify, send_file, render_template, make_response
 from flask_cors import CORS
+import base64
 
 # Configuração de Logs
 logging.basicConfig(level=logging.DEBUG)
@@ -127,14 +128,22 @@ COMPILE_TIMEOUT = int(os.environ.get('COMPILE_TIMEOUT', 300))
 MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 PROJECTS_CACHE_DIR = Path("projects_cache")
-PROJECTS_CACHE_DIR.mkdir(exist_ok=True)
+# ==================================================================================
+#  SISTEMA DE CRÉDITOS (NOVO)
+# ==================================================================================
 
-# Planos
+# Planos movidos para cima
+
+# ==================================================================================
+#  SISTEMA DE CRÉDITOS (NOVO)
+# ==================================================================================
+
+# Planos com Créditos Iniciais (Mensal ou Único)
 PLANS = {
-    'free': {'compilationsPerDay': 5, 'name': 'Gratuito'},
-    'basic': {'compilationsPerDay': 50, 'name': 'Básico'},
-    'pro': {'compilationsPerDay': 500, 'name': 'Profissional'},
-    'unlimited': {'compilationsPerDay': 999999, 'name': 'Ilimitado'}
+    'free': {'initialCredits': 10, 'name': 'Gratuito'},
+    'basic': {'initialCredits': 100, 'name': 'Básico'},
+    'pro': {'initialCredits': 1000, 'name': 'Profissional'},
+    'unlimited': {'initialCredits': 999999, 'name': 'Ilimitado'}
 }
 
 # ==================================================================================
@@ -181,45 +190,58 @@ def get_user_subscription(uid):
         logger.error(f"Erro ao buscar assinatura: {e}")
         return {'plan': 'free', 'status': 'error'}
 
-def check_daily_limit(uid, plan_name):
-    """Verifica e incrementa uso diário."""
+
+def get_user_credits(uid):
+    """Retorna créditos restantes do usuário."""
     try:
-        today = time.strftime('%Y-%m-%d')
-        limit = PLANS.get(plan_name, PLANS['free'])['compilationsPerDay']
+        # Estrutura: users/{uid}/credits
+        ref = db.reference(f'users/{uid}/credits')
+        current_credits = ref.get()
         
-        ref = db.reference(f'dailyUsage/{uid}_{today}')
-        usage_data = ref.get()
-        
-        current_usage = 0
-        if usage_data:
-            current_usage = usage_data.get('count', 0)
-        
-        if current_usage >= limit:
-            return False, limit, current_usage
+        if current_credits is None:
+            # Se não tiver, define inicial do plano Free (migração)
+            current_credits = PLANS['free']['initialCredits']
+            ref.set(current_credits)
             
-        return True, limit, current_usage
+        return int(current_credits)
     except Exception as e:
-        logger.error(f"Erro ao verificar limite: {e}")
-        # Em caso de erro no banco, permite (fail open) ou nega? Vamos permitir por segurança do UX
-        return True, 5, 0
+        logger.error(f"Erro ao buscar créditos: {e}")
+        return 0
 
-def increment_usage(uid):
-    """Incrementa contador de uso."""
+def consume_credit(uid):
+    """Consome 1 crédito. Retorna True se sucesso, False se sem saldo."""
     try:
-        today = time.strftime('%Y-%m-%d')
-        ref = db.reference(f'dailyUsage/{uid}_{today}')
+        ref = db.reference(f'users/{uid}/credits')
         
-        # Transactional increment
-        def increment_tx(current_val):
+        def transaction_deduct(current_val):
             if current_val is None:
-                return {'count': 1, 'date': today, 'userId': uid, 'lastUsed': int(time.time() * 1000)}
-            current_val['count'] = (current_val.get('count', 0) + 1)
-            current_val['lastUsed'] = int(time.time() * 1000)
-            return current_val
-
-        ref.transaction(increment_tx)
+                return PLANS['free']['initialCredits'] - 1
+            
+            if current_val > 0:
+                return current_val - 1
+            else:
+                return -1 # Sinal de sem crédito (abort transaction logic custom)
+        
+        # A transação retorna o novo valor, mas aqui simplifico
+        # Se retornar -1, é pq não tinha. Mas transaction update atomicamente.
+        
+        # Melhor abordagem com transaction result
+        # Mas o Python Client do Firebase Admin é chato com abort
+        # Vamos fazer check-and-set otimista simples para este MVP
+        
+        current = ref.get()
+        if current is None:
+            current = PLANS['free']['initialCredits']
+            
+        if current > 0:
+             ref.set(current - 1)
+             return True, current - 1
+        else:
+             return False, 0
+             
     except Exception as e:
-        logger.error(f"Erro ao incrementar uso: {e}")
+        logger.error(f"Erro ao consumir crédito: {e}")
+        return False, 0
 
 # ==================================================================================
 #  API ENDPOINTS (SaaS)
@@ -253,6 +275,7 @@ def api_auth_sync():
                 'createdAt': int(time.time() * 1000),
                 'lastLogin': int(time.time() * 1000),
                 'hardwareFingerprint': hardware_id,
+                'credits': PLANS['free']['initialCredits'], # Novo: Créditos Iniciais
                 'subscription': {
                     'plan': 'free',
                     'status': 'active',
@@ -273,7 +296,7 @@ def api_auth_sync():
 @app.route('/api/user/me', methods=['GET'])
 @check_auth
 def api_user_me():
-    """Retorna dados do usuário e limtes."""
+    """Retorna dados do usuário e créditos."""
     try:
         uid = request.user['uid']
         user_ref = db.reference(f'users/{uid}')
@@ -285,16 +308,19 @@ def api_user_me():
         sub = user_data.get('subscription', {'plan': 'free', 'status': 'expired'})
         plan = sub.get('plan', 'free')
         
-        allowed, limit, used = check_daily_limit(uid, plan)
+        # Busca créditos
+        credits = user_data.get('credits', 0)
         
         return jsonify({
             'user': {'email': user_data.get('email')},
             'subscription': {
                 'plan': plan,
                 'status': sub.get('status'),
-                'dailyLimit': limit,
-                'dailyUsed': used,
-                'dailyRemaining': max(0, limit - used)
+                'credits': credits, # Novo campo
+                # Campos antigos para compatibilidade (opcional)
+                'dailyLimit': credits, 
+                'dailyUsed': 0,
+                'dailyRemaining': credits
             }
         })
     except Exception as e:
@@ -304,34 +330,38 @@ def api_user_me():
 @app.route('/api/subscription/purchase', methods=['POST'])
 @check_auth
 def api_purchase():
-    """Simula compra."""
+    """Simula compra de pacotes de créditos/plano."""
     try:
         uid = request.user['uid']
         plan = request.json.get('plan', 'pro')
         
         # Lógica de Compra:
-        # Atualiza diretamente o nó subscription do usuário
+        # Adiciona créditos ao saldo atual
         
-        from datetime import datetime, timedelta
-        expires = (datetime.utcnow() + timedelta(days=30)).isoformat()
+        credits_to_add = PLANS.get(plan, PLANS['free'])['initialCredits']
         
         user_ref = db.reference(f'users/{uid}')
-        
-        # Atualiza plano no root do usuário e no obj subscription
-        user_ref.update({
-            'plan': plan,
-            'subscription': {
+        # Transactional add
+        def add_credits(current_val):
+            if current_val is None: return {'credits': credits_to_add}
+            # Se for dict (nó user), atualiza credits
+            current_credits = current_val.get('credits', 0)
+            current_val['credits'] = current_credits + credits_to_add
+            
+            # Atualiza subscription metadata
+            current_val['plan'] = plan
+            current_val['subscription'] = {
                 'plan': plan,
-                'status': 'active', # Auto-aprovado!
-                'startedAt': int(time.time() * 1000),
-                'expiresAt': expires,
-                'paymentMethod': 'simulated_local'
+                'status': 'active',
+                'paymentMethod': 'simulated_credit_pack'
             }
-        })
+            return current_val
+
+        user_ref.transaction(add_credits)
         
         return jsonify({
             'success': True, 
-            'message': f'Plano {plan} ativado (Auto-Aprovado)!'
+            'message': f'Pacote {plan} ativado! +{credits_to_add} créditos.'
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -339,25 +369,77 @@ def api_purchase():
 @app.route('/api/compile', methods=['POST'])
 @check_auth
 def api_compile():
-    """API de Compilação Protegida (SaaS)."""
+    """API de Compilação Protegida (SaaS) com Créditos."""
     uid = request.user['uid']
     
-    # 1. Verificar Limites
-    sub = get_user_subscription(uid)
-    allowed, limit, used = check_daily_limit(uid, sub.get('plan', 'free'))
+    # 1. Tentar Consumir Crédito
+    success, new_balance = consume_credit(uid)
     
-    if not allowed:
+    if not success:
         return jsonify({
-            'error': f'Limite diário atingido ({limit}). Faça upgrade.',
-            'code': 'DAILY_LIMIT'
+            'error': 'Você está sem créditos. Adquira mais para continuar compilando.',
+            'code': 'NO_CREDITS' # Código específico para o frontend
         }), 403
         
-    # 2. Registrar Uso
-    increment_usage(uid)
-    
-    # 3. Encaminhar para lógica real de compilação
+    # 2. Encaminhar para lógica real de compilação
     # Como já estamos no servidor Python, chamamos a função local!
     return compile_real_logic()
+
+@app.route('/api/sync', methods=['POST'])
+# @check_auth # Start open for ease of use, can enable later
+def api_sync_files():
+    """Receives individual files and saves them to a local folder."""
+    try:
+        data = request.json
+        project_id = data.get('projectId', 'unknown_project')
+        files = data.get('files', {}) # { "path/to/file.tex": "content" }
+        binary_files = data.get('binaryFiles', {}) # { "path/to/image.png": "base64_string" }
+        
+        # Determine target directory
+        # We can use a 'Synced_Projects' folder in the server directory, or user home
+        # For now, let's put it in "Synced_Projects" relative to where server runs
+        target_dir = Path("Synced_Projects") / project_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        saved_count = 0
+        
+        # Save Text Files
+        for rel_path, content in files.items():
+            safe_path = Path(rel_path)
+            if safe_path.is_absolute() or '..' in str(safe_path):
+                continue # Security check
+                
+            file_path = target_dir / safe_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            saved_count += 1
+            
+        # Save Binary Files
+        for rel_path, b64_content in binary_files.items():
+            safe_path = Path(rel_path)
+            if safe_path.is_absolute() or '..' in str(safe_path):
+                continue
+                
+            file_path = target_dir / safe_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                # Remove header if present (e.g. "data:image/png;base64,...")
+                if ',' in b64_content:
+                    b64_content = b64_content.split(',')[1]
+                
+                with open(file_path, 'wb') as f:
+                    f.write(base64.b64decode(b64_content))
+                saved_count += 1
+            except Exception as bin_err:
+                logger.error(f"Error saving binary {rel_path}: {bin_err}")
+            
+        logger.info(f"Synced {saved_count} files for project {project_id}")
+        return jsonify({'success': True, 'message': f'Synced {saved_count} files to {target_dir.absolute()}'})
+
+    except Exception as e:
+        logger.error(f"Sync error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ==================================================================================
 #  LÓGICA DE COMPILAÇÃO (Herdada da v2)
@@ -366,46 +448,73 @@ def api_compile():
 def compile_real_logic():
     """Lógica original de compilação refatorada para ser chamada pela rota."""
     try:
-        data = request.json
-        files = data.get('files', {})
-        main_file = data.get('mainFile', 'main.tex')
-        engine = data.get('engine', 'pdflatex')
-        project_id = data.get('projectId', 'temp_project')
+        # Check if JSON or Form Data
+        is_json = request.is_json
         
+        main_file = 'main.tex'
+        engine = 'pdflatex'
+        project_id = 'temp_project'
+        files_data = {}
+        binary_files_data = {}
+        
+        if is_json:
+            data = request.json
+            files_data = data.get('files', {})
+            binary_files_data = data.get('binaryFiles', {})
+            main_file = data.get('mainFile', 'main.tex')
+            engine = data.get('engine', 'pdflatex')
+            project_id = data.get('projectId', 'temp_project')
+        else:
+            # Fallback for Form Data (Zip) - Legacy or backup
+            if 'source_zip' in request.files:
+                # We won't implement ZIP here perfectly to keep it simple as user wants JSON
+                # But let's raise error if no JSON and no ZIP handling logic fully implemented
+                return jsonify({'error': 'Please use JSON format with individual files (Smart Sync). ZIP upload is deprecated in this mode.'}), 415
+            
+            # If form data has manual files (not implemented in client yet)
+            data = request.form
+            main_file = data.get('mainFile', 'main.tex')
+            engine = data.get('engine', 'pdflatex')
+
         with tempfile.TemporaryDirectory() as temp_dir:
             work_dir = Path(temp_dir)
             
-            # Setup Cache/Arquivos (Simplificado para brevidade)
-            if is_zip:
-                # Save and extract ZIP
-                zip_path = work_dir / "project.zip"
-                uploaded_file.save(zip_path)
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(work_dir)
-                
-                # Auto-detect main file if default doesn't exist
-                if not (work_dir / main_file).exists():
-                    # Try to find a .tex file with \documentclass
-                    tex_files = list(work_dir.glob('**/*.tex'))
-                    for tex_file in tex_files:
-                        try:
-                            content = tex_file.read_text(encoding='utf-8', errors='ignore')
-                            if '\\documentclass' in content:
-                                main_file = str(tex_file.relative_to(work_dir))
-                                break
-                        except:
-                            pass
-            else:
-                # Write individual files from JSON
-                for filename, content in files_data.items():
-                    file_path = work_dir / filename
-                    file_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
+            # 1. Write Text Files
+            for filename, content in files_data.items():
+                file_path = work_dir / filename
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
 
-            # Ensure we have a main file
+            # 2. Write Binary Files
+            for filename, b64_content in binary_files_data.items():
+                file_path = work_dir / filename
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    if ',' in b64_content:
+                        b64_content = b64_content.split(',')[1]
+                    with open(file_path, 'wb') as f:
+                        f.write(base64.b64decode(b64_content))
+                except Exception as e:
+                    logger.error(f"Error writing binary file {filename}: {e}")
+
+            # 3. Ensure we have a main file
             if not (work_dir / main_file).exists():
-                 return jsonify({'error': f'Main file "{main_file}" not found in project.'}), 400
+                 # Try to auto-detect
+                 tex_files = list(work_dir.glob('**/*.tex'))
+                 found = False
+                 for tex_file in tex_files:
+                     try:
+                         content = tex_file.read_text(encoding='utf-8', errors='ignore')
+                         if '\\documentclass' in content:
+                             main_file = str(tex_file.relative_to(work_dir))
+                             found = True
+                             break
+                     except:
+                         pass
+                 
+                 if not found:
+                     return jsonify({'error': f'Main file "{main_file}" not found in project and auto-detection failed.'}), 400
 
             # Run LaTeX
             pdf_filename = Path(main_file).stem + '.pdf'
@@ -421,7 +530,11 @@ def compile_real_logic():
                 ]
                 # MiKTeX auto-install check
                 if os.name == 'nt':
-                    cmd.insert(1, '-enable-installer')
+                     # On Windows, sometimes we need to ensure PATH or env 
+                     # For now, let's just run it. 
+                     # removed -enable-installer to avoid interactive prompts hanging
+                     pass
+                     
                 return subprocess.run(
                     cmd,
                     cwd=str(work_dir),
@@ -429,6 +542,7 @@ def compile_real_logic():
                     stderr=subprocess.PIPE,
                     timeout=COMPILE_TIMEOUT
                 )
+
 
             # Run twice for references (bibtex handling could be added here)
             result = run_latex()
