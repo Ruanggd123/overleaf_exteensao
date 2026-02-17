@@ -282,12 +282,91 @@
 
             } catch (error) {
                 console.error(error);
-                alert('Erro na compilação:\n' + error.message.slice(0, 1000));
+                this.showErrorModal('Erro na compilação', error.message);
             } finally {
                 btnCompile.innerHTML = originalText;
                 btnCompile.disabled = false;
                 if (btnDownload) btnDownload.disabled = false;
             }
+        }
+
+        showErrorModal(title, message) {
+            // Remove existing modal
+            const existing = document.getElementById('olc-error-modal');
+            if (existing) existing.remove();
+
+            // Overlay
+            const overlay = document.createElement('div');
+            overlay.id = 'olc-error-modal';
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            overlay.style.zIndex = '9999';
+            overlay.style.display = 'flex';
+            overlay.style.justifyContent = 'center';
+            overlay.style.alignItems = 'center';
+
+            // Modal
+            const modal = document.createElement('div');
+            modal.style.backgroundColor = '#fff';
+            modal.style.padding = '20px';
+            modal.style.borderRadius = '8px';
+            modal.style.width = '600px';
+            modal.style.maxWidth = '90%';
+            modal.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+            modal.style.display = 'flex';
+            modal.style.flexDirection = 'column';
+            modal.style.maxHeight = '80vh';
+
+            // Header
+            const header = document.createElement('h3');
+            header.innerText = title;
+            header.style.marginTop = '0';
+            header.style.color = '#d32f2f';
+            modal.appendChild(header);
+
+            // Log Area
+            const logArea = document.createElement('pre');
+            logArea.innerText = message;
+            logArea.style.backgroundColor = '#f5f5f5';
+            logArea.style.padding = '10px';
+            logArea.style.borderRadius = '4px';
+            logArea.style.overflow = 'auto'; // SCROLLABLE!
+            logArea.style.flex = '1';
+            logArea.style.fontSize = '12px';
+            logArea.style.border = '1px solid #ddd';
+            modal.appendChild(logArea);
+
+            // Buttons
+            const btnGroup = document.createElement('div');
+            btnGroup.style.marginTop = '15px';
+            btnGroup.style.display = 'flex';
+            btnGroup.style.justifyContent = 'flex-end';
+            btnGroup.style.gap = '10px';
+
+            const btnCopy = document.createElement('button');
+            btnCopy.className = 'btn btn-default';
+            btnCopy.innerText = '📋 Copiar Erro';
+            btnCopy.onclick = () => {
+                navigator.clipboard.writeText(message);
+                btnCopy.innerText = '✅ Copiado!';
+                setTimeout(() => btnCopy.innerText = '📋 Copiar Erro', 2000);
+            };
+
+            const btnClose = document.createElement('button');
+            btnClose.className = 'btn btn-primary';
+            btnClose.innerText = 'Fechar';
+            btnClose.onclick = () => overlay.remove();
+
+            btnGroup.appendChild(btnCopy);
+            btnGroup.appendChild(btnClose);
+            modal.appendChild(btnGroup);
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
         }
 
         showPdf(blob) {
