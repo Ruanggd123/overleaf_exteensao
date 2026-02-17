@@ -116,56 +116,85 @@
         }
 
         injectCompilerUI(locked = false) {
-            // Find toolbar - Overleaf structure changes, so we need robust selector
+            // Find toolbar
             const toolbar = document.querySelector('.toolbar-pdf') || document.querySelector('.toolbar-header-right');
             if (!toolbar) return;
 
-            // Remove existing button if any to avoid duplicates/stale state
-            const existingBtn = document.getElementById('olc-cloud-btn');
+            // Remove existing buttons/container
+            const existingContainer = document.getElementById('olc-btn-group');
+            if (existingContainer) existingContainer.remove();
+            const existingBtn = document.getElementById('olc-cloud-btn'); // Legacy cleanup
             if (existingBtn) existingBtn.remove();
 
-            const btn = document.createElement('button');
-            btn.id = 'olc-cloud-btn';
-            btn.className = 'btn btn-primary';
-            btn.style.marginLeft = '10px';
-            btn.style.height = '100%';
-            btn.innerHTML = locked ? '🔒 Login Extensão' : '⚡ Cloud Compile';
+            // Create Container
+            const container = document.createElement('div');
+            container.id = 'olc-btn-group';
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+            container.style.height = '100%';
+            container.style.marginLeft = '10px';
+            container.style.gap = '5px';
 
-            btn.onclick = async () => {
+            // 1. Cloud Compile Button
+            const btnCompile = document.createElement('button');
+            btnCompile.id = 'olc-cloud-btn';
+            btnCompile.className = 'btn btn-primary';
+            btnCompile.style.height = '100%';
+            btnCompile.innerHTML = locked ? '🔒 Login Extensão' : '⚡ Cloud Compile';
+
+            // 2. Download Button
+            const btnDownload = document.createElement('button');
+            btnDownload.id = 'olc-download-btn';
+            btnDownload.className = 'btn btn-default'; // Slightly different style
+            btnDownload.style.height = '100%';
+            btnDownload.innerHTML = '⬇️ PDF';
+            btnDownload.title = 'Compilar e Baixar PDF';
+            if (locked) btnDownload.style.display = 'none'; // Hide if locked
+
+            // Actions
+            const handleAction = async (actionType) => {
                 if (locked) {
-                    btn.innerHTML = '🔄 Verificando...';
-                    btn.disabled = true;
+                    btnCompile.innerHTML = '🔄 Verificando...';
+                    btnCompile.disabled = true;
 
-                    // Force refresh auth token from storage
                     const result = await new Promise(r => chrome.storage.local.get(['authToken'], r));
                     this.authToken = result.authToken;
 
                     if (!this.authToken) {
                         alert('Você não está logado na extensão.\n\n1. Abra a extensão (clique no ícone 📄).\n2. Faça login.\n3. Tente novamente.');
-                        btn.innerHTML = '🔒 Login Extensão';
-                        btn.disabled = false;
+                        btnCompile.innerHTML = '🔒 Login Extensão';
+                        btnCompile.disabled = false;
                         return;
                     }
 
                     const hasAccess = await this.checkSubscription();
                     if (hasAccess) {
-                        // Unlock and compile!
-                        btn.innerHTML = '⚡ Cloud Compile';
-                        btn.disabled = false;
-                        locked = false; // Persistent unlock for this session
-                        this.compile();
+                        // Unlock
+                        btnCompile.innerHTML = '⚡ Cloud Compile';
+                        btnCompile.disabled = false;
+                        btnDownload.style.display = 'block';
+                        locked = false;
+
+                        // Proceed with action
+                        this.compile(actionType);
                     } else {
-                        alert('Assinatura não encontrada ou expirada.\nVerifique seu status na extensão.');
-                        btn.innerHTML = '🔒 Login Extensão';
-                        btn.disabled = false;
+                        alert('Assinatura não encontrada ou expirada.');
+                        btnCompile.innerHTML = '🔒 Login Extensão';
+                        btnCompile.disabled = false;
                     }
                 } else {
-                    this.compile();
+                    this.compile(actionType);
                 }
             };
 
-            // Insert at beginning or end
-            toolbar.insertBefore(btn, toolbar.firstChild);
+            btnCompile.onclick = () => handleAction('view');
+            btnDownload.onclick = () => handleAction('download');
+
+            container.appendChild(btnCompile);
+            container.appendChild(btnDownload);
+
+            // Insert
+            toolbar.insertBefore(container, toolbar.firstChild);
         }
 
         async extractFiles() {
@@ -202,11 +231,14 @@
             };
         }
 
-        async compile() {
-            const btn = document.getElementById('olc-cloud-btn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳ Enviando...';
-            btn.disabled = true;
+        async compile(actionType = 'view') {
+            const btnCompile = document.getElementById('olc-cloud-btn');
+            const btnDownload = document.getElementById('olc-download-btn');
+
+            const originalText = btnCompile.innerHTML;
+            btnCompile.innerHTML = '⏳ Enviando...';
+            btnCompile.disabled = true;
+            if (btnDownload) btnDownload.disabled = true;
 
             try {
                 const files = await this.extractFiles();
@@ -242,20 +274,36 @@
                     throw new Error(json.error || 'Unknown error');
                 }
 
-                this.showPdf(blob);
+                if (actionType === 'download') {
+                    this.downloadPdf(blob);
+                } else {
+                    this.showPdf(blob);
+                }
 
             } catch (error) {
                 console.error(error);
-                alert('Erro na compilação:\n' + error.message.slice(0, 500));
+                alert('Erro na compilação:\n' + error.message.slice(0, 1000));
             } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
+                btnCompile.innerHTML = originalText;
+                btnCompile.disabled = false;
+                if (btnDownload) btnDownload.disabled = false;
             }
         }
 
         showPdf(blob) {
             const url = URL.createObjectURL(blob);
             window.open(url, '_blank');
+        }
+
+        downloadPdf(blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'document.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
     }
 
