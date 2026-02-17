@@ -181,12 +181,21 @@
             }
             // Try CodeMirror (new/source)
             else if (document.querySelector('.cm-content')) {
-                content = document.querySelector('.cm-content').innerText;
+                // Better scraping for CM6
+                const lines = document.querySelectorAll('.cm-content .cm-line');
+                if (lines.length > 0) {
+                    content = Array.from(lines).map(line => line.textContent).join('\n');
+                } else {
+                    content = document.querySelector('.cm-content').innerText;
+                }
             }
             // Fallback: just a mock if we can't grab it easily without more permissions
             else {
                 content = "% Could not grab editor content automatically.\n% Please ensure you are in the Source editor.";
             }
+
+            console.log('[OLC] Extracted content length:', content.length);
+            // console.log('[OLC] Preview:', content.substring(0, 100));
 
             return {
                 "main.tex": content
@@ -217,7 +226,9 @@
 
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
-                    throw new Error(error.error || error.logs || 'Server error');
+                    const msg = error.error || 'Server error';
+                    const logs = error.logs ? '\n\nLogs:\n' + error.logs : '';
+                    throw new Error(msg + logs);
                 }
 
                 // const data = await response.json(); // It returns a PDF blob, not JSON unless error
