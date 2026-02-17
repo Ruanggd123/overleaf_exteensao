@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Overleaf Pro Compiler",
-  "version": "2.0.0",
+  "version": "2.1.1",
   "description": "Compilador LaTeX cloud-based com sistema de assinaturas",
   "permissions": [
     "activeTab",
@@ -14,7 +14,8 @@
     "https://*.firebaseapp.com/*",
     "https://*.googleapis.com/*",
     "https://*.cloudfunctions.net/*",
-    "http://localhost:8765/*"
+    "http://localhost:8765/*",
+    "https://meu-latex-server.onrender.com/*"
   ],
   "background": {
     "service_worker": "background.js",

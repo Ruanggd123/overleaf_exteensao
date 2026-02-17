@@ -38,7 +38,7 @@
 
     class OverleafCloudCompiler {
         constructor() {
-            this.defaultApiUrl = 'https://meu-latex-server.onrender.com/api';
+            this.defaultApiUrl = 'http://localhost:8765/api';
             this.apiUrl = this.defaultApiUrl;
             this.init();
             console.log('[OLC] Cloud Compiler initialized');
@@ -70,8 +70,8 @@
             // Listen for storage changes (login/logout in popup)
             chrome.storage.onChanged.addListener((changes, namespace) => {
                 if (namespace === 'local' && changes.authToken) {
-                    // Optional: reload or just re-init
-                    // location.reload(); 
+                    console.log('[OLC] Auth token changed, reloading page...');
+                    location.reload();
                 }
             });
         }
@@ -80,20 +80,31 @@
             try {
                 // We use the LOCAL SERVER to proxy the check or check directly if we had custom claims
                 // But since we have a python server, let's hit it.
-                // NOTE: If python server is offline, this fails. 
-                // Fallback: If offline, we might want to check auth.currentUser directly if we could...
-                // But content script can't access auth.currentUser session from popup easily without background.
+
+                console.log('[OLC] Checking subscription via:', `${this.apiUrl}/user/me`);
 
                 const response = await fetch(`${this.apiUrl}/user/me`, {
                     headers: { 'Authorization': `Bearer ${this.authToken}` }
                 });
 
-                if (!response.ok) return false;
+                if (!response.ok) {
+                    console.error('[OLC] Subscription check failed with status:', response.status);
+                    if (response.status === 401) console.error('[OLC] Token invalid or expired');
+                    if (response.status === 403) console.error('[OLC] Forbidden access');
+                    return false;
+                }
 
                 const data = await response.json();
-                return data.subscription && data.subscription.dailyRemaining > 0;
+                console.log('[OLC] Subscription data:', data);
+
+                if (data.subscription && data.subscription.dailyRemaining > 0) {
+                    return true;
+                } else {
+                    console.warn('[OLC] Subscription valid but daily limit reached or plan expired', data);
+                    return false;
+                }
             } catch (error) {
-                console.error('[OLC] Check subscription failed', error);
+                console.error('[OLC] Check subscription failed (Network/Catch):', error);
                 return false;
             }
         }
