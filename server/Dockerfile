@@ -7,6 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-fonts-recommended \
     texlive-fonts-extra \
     texlive-latex-extra \
+    texlive-lang-portuguese \
+    texlive-science \
+    texlive-publishers \
+    texlive-bibtex-extra \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
