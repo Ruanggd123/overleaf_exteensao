@@ -27,15 +27,6 @@
         console.error('[OLC] Firebase init error:', e);
     }
 
-    // Check if firebase loaded
-    if (typeof firebase === 'undefined') {
-        console.error('[OLC] Firebase SDK not loaded');
-        return;
-    }
-
-    const auth = firebase.auth();
-    // const db = firebase.firestore(); // valid if needed
-
     class OverleafCloudCompiler {
         constructor() {
             this.defaultApiUrl = 'https://meu-latex-server.onrender.com/api';
@@ -48,12 +39,11 @@
             // Sync auth state and settings
             chrome.storage.local.get(['authToken', 'apiUrl'], async (result) => {
                 this.authToken = result.authToken;
-                if (result.apiUrl && !result.apiUrl.includes('localhost')) {
+                if (result.apiUrl) {
                     this.apiUrl = result.apiUrl;
-                } else if (result.apiUrl && result.apiUrl.includes('localhost')) {
-                    console.warn('[OLC] Ignoring localhost config from storage, using default cloud URL.');
-                    // Optional: clear it
-                    chrome.storage.local.remove('apiUrl');
+                    console.log('[OLC] Using configured API:', this.apiUrl);
+                } else {
+                    console.log('[OLC] Using default cloud API:', this.apiUrl);
                 }
 
                 console.log('[OLC] Using API:', this.apiUrl);
@@ -84,9 +74,6 @@
 
         async checkSubscription() {
             try {
-                // We use the LOCAL SERVER to proxy the check or check directly if we had custom claims
-                // But since we have a python server, let's hit it.
-
                 console.log('[OLC] Checking subscription via:', `${this.apiUrl}/user/me`);
 
                 const response = await fetch(`${this.apiUrl}/user/me`, {
@@ -95,8 +82,6 @@
 
                 if (!response.ok) {
                     console.error('[OLC] Subscription check failed with status:', response.status);
-                    if (response.status === 401) console.error('[OLC] Token invalid or expired');
-                    if (response.status === 403) console.error('[OLC] Forbidden access');
                     return false;
                 }
 
@@ -126,7 +111,9 @@
             // Remove existing buttons/container
             const existingContainer = document.getElementById('olc-btn-group');
             if (existingContainer) existingContainer.remove();
-            const existingBtn = document.getElementById('olc-cloud-btn'); // Legacy cleanup
+
+            // Legacy cleanup
+            const existingBtn = document.getElementById('olc-cloud-btn');
             if (existingBtn) existingBtn.remove();
 
             // Create Container
@@ -138,6 +125,35 @@
             container.style.marginLeft = '10px';
             container.style.gap = '5px';
 
+            // Environment Toggle (New)
+            const toggleContainer = document.createElement('div');
+            toggleContainer.style.display = 'flex';
+            toggleContainer.style.alignItems = 'center';
+            toggleContainer.style.marginRight = '10px';
+            toggleContainer.style.fontSize = '12px';
+            toggleContainer.style.backgroundColor = '#f1f1f1';
+            toggleContainer.style.padding = '2px 6px';
+            toggleContainer.style.borderRadius = '4px';
+            toggleContainer.style.cursor = 'pointer';
+            toggleContainer.title = 'Clique para alternar entre Cloud (Padrão) e Local (8765)';
+
+            const isLocal = this.apiUrl.includes('localhost');
+            toggleContainer.innerHTML = isLocal ? '🏠 Local' : '☁️ Cloud';
+            toggleContainer.style.border = isLocal ? '1px solid #ff9800' : '1px solid #ddd';
+            toggleContainer.style.color = '#333';
+
+            toggleContainer.onclick = () => {
+                if (isLocal) {
+                    if (confirm('Mudar para servidor CLOUD?')) {
+                        chrome.storage.local.remove('apiUrl', () => location.reload());
+                    }
+                } else {
+                    if (confirm('Mudar para servidor LOCAL (localhost:8765)?')) {
+                        chrome.storage.local.set({ apiUrl: 'http://localhost:8765/api' }, () => location.reload());
+                    }
+                }
+            };
+
             // 1. Cloud Compile Button
             const btnCompile = document.createElement('button');
             btnCompile.id = 'olc-cloud-btn';
@@ -148,22 +164,22 @@
             // 2. Download Button
             const btnDownload = document.createElement('button');
             btnDownload.id = 'olc-download-btn';
-            btnDownload.className = 'btn btn-default'; // Slightly different style
+            btnDownload.className = 'btn btn-default';
             btnDownload.style.height = '100%';
             btnDownload.innerHTML = '⬇️ PDF';
             btnDownload.title = 'Compilar e Baixar PDF';
-            if (locked) btnDownload.style.display = 'none'; // Hide if locked
+            if (locked) btnDownload.style.display = 'none';
 
             // 3. Sync Button
             const btnSync = document.createElement('button');
             btnSync.id = 'olc-sync-btn';
             btnSync.className = 'btn btn-default';
             btnSync.style.height = '100%';
-            btnSync.innerHTML = '📂 Sync Local';
-            btnSync.title = 'Sincronizar arquivos com pasta local';
+            btnSync.innerHTML = '📂 Sync Zip';
+            btnSync.title = 'Sincronizar via ZIP';
             if (locked) btnSync.style.display = 'none';
 
-            // 4. Credits Label (New)
+            // 4. Credits Label
             const lblCredits = document.createElement('span');
             lblCredits.id = 'olc-credits-lbl';
             lblCredits.style.marginLeft = '10px';
@@ -188,7 +204,6 @@
                         return;
                     }
 
-                    // Check subscription and get credits
                     try {
                         const response = await fetch(`${this.apiUrl}/user/me`, {
                             headers: { 'Authorization': `Bearer ${this.authToken}` }
@@ -197,9 +212,7 @@
 
                         if (response.ok && data.subscription) {
                             const credits = data.subscription.credits !== undefined ? data.subscription.credits : 0;
-
                             if (credits > 0) {
-                                // Unlock
                                 btnCompile.innerHTML = '⚡ Cloud Compile';
                                 btnCompile.disabled = false;
                                 btnDownload.style.display = 'block';
@@ -207,11 +220,9 @@
                                 lblCredits.style.display = 'inline';
                                 lblCredits.innerText = `Créditos: ${credits}`;
                                 locked = false;
-
-                                // Proceed
                                 this.compile(actionType);
                             } else {
-                                alert('Seus créditos de compilação acabaram. Por favor, recarregue.');
+                                alert('Seus créditos de compilação acabaram.');
                                 btnCompile.innerHTML = '🔒 Sem Créditos';
                                 btnCompile.disabled = false;
                             }
@@ -226,7 +237,6 @@
                         btnCompile.innerHTML = '🔒 Erro Conexão';
                         btnCompile.disabled = false;
                     }
-
                 } else {
                     this.compile(actionType);
                 }
@@ -236,12 +246,12 @@
             btnDownload.onclick = () => handleAction('download');
             btnSync.onclick = () => this.syncProject();
 
+            container.appendChild(toggleContainer);
             container.appendChild(btnCompile);
             container.appendChild(btnDownload);
             container.appendChild(btnSync);
             container.appendChild(lblCredits);
 
-            // Insert
             toolbar.insertBefore(container, toolbar.firstChild);
         }
 
@@ -250,86 +260,82 @@
             return match ? match[1] : null;
         }
 
-        async fetchProjectZip(projectId) {
-            try {
-                const response = await fetch(`https://www.overleaf.com/project/${projectId}/download/zip`, {
-                    method: 'GET'
-                });
-                if (!response.ok) throw new Error('Failed to download project ZIP from Overleaf');
-                return await response.blob();
-            } catch (e) {
-                console.error('[OLC] Error fetching ZIP:', e);
-                throw e;
+        // --- CORE FUNCTION: Fetch Project via ZIP ---
+        async fetchAndExtractZip(projectId) {
+            // 1. Download ZIP
+            // Using /download/zip usually works reliably
+            const response = await fetch(`https://www.overleaf.com/project/${projectId}/download/zip`, {
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) throw new Error('Projeto não encontrado ou acesso negado (404).');
+                throw new Error(`Falha ao baixar ZIP do projeto: ${response.status}`);
             }
+
+            const zipBlob = await response.blob();
+
+            // 2. Load JSZip
+            // Assumes known global JSZip
+            if (typeof JSZip === 'undefined') {
+                throw new Error('Biblioteca JSZip não carregada. Recarregue a extensão.');
+            }
+
+            const zip = await JSZip.loadAsync(zipBlob);
+            const files = {};
+            const binaryFiles = {};
+
+            // 3. Iterate
+            for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
+                if (zipEntry.dir) continue;
+                if (relativePath.startsWith('__MACOSX')) continue; // Ignore mac junk
+
+                // Simple check for binaries
+                // We treat everything as binary unless it screams text, 
+                // BUT extracting as string is safer for encoding if we know it is text.
+                const isImages = /\.(png|jpg|jpeg|gif|ico|bmp|webp)$/i.test(relativePath);
+                const isPdf = /\.pdf$/i.test(relativePath);
+                const isZip = /\.zip$/i.test(relativePath);
+                const isFont = /\.(ttf|otf|eot|woff|woff2)$/i.test(relativePath);
+
+                if (isImages || isPdf || isZip || isFont) {
+                    const b64 = await zipEntry.async('base64');
+                    binaryFiles[relativePath] = b64;
+                } else {
+                    // Default to text (tex, sty, cls, bib, txt, md, etc)
+                    const text = await zipEntry.async('string');
+                    files[relativePath] = text;
+                }
+            }
+
+            return { files, binaryFiles };
         }
 
         async compile(actionType = 'view') {
             const btnCompile = document.getElementById('olc-cloud-btn');
             const btnDownload = document.getElementById('olc-download-btn');
-
             const originalText = btnCompile.innerHTML;
-            btnCompile.innerHTML = '⏳ Preparando...';
+
+            btnCompile.innerHTML = '⏳ Baixando ZIP...';
             btnCompile.disabled = true;
             if (btnDownload) btnDownload.disabled = true;
 
             try {
                 const projectId = this.getProjectId();
-                if (!projectId) throw new Error('Project ID not found in URL');
+                if (!projectId) throw new Error('ID do projeto não encontrado na URL');
 
-                // 1. Parse File Tree (Reuse logic)
-                const fileMap = this.parseFileTree();
-                if (Object.keys(fileMap).length === 0) {
-                    // Try one more time with a delay? Or just warn.
-                    console.warn('[OLC] No files found in tree. Compilation might fail if files are hidden.');
-                }
-
-                btnCompile.innerHTML = '📥 Baixando...';
-
-                // 2. Fetch all files
-                const files = {};
-                const binaryFiles = {};
-
-                const fileIds = Object.keys(fileMap);
-                // We need to fetch ALL files for compilation to work
-                // Concurrency limits to avoid ratelimit
-                const concurrency = 5;
-                let completed = 0;
-
-                // Helper to update progress
-                const updateProgress = () => {
-                    btnCompile.innerHTML = `📥 ${completed}/${fileIds.length}`;
-                };
-
-                for (let i = 0; i < fileIds.length; i += concurrency) {
-                    const chunk = fileIds.slice(i, i + concurrency);
-                    await Promise.all(chunk.map(async (fileId) => {
-                        try {
-                            const result = await this.fetchFileContent(projectId, fileId);
-                            if (result.isBinary) {
-                                binaryFiles[fileMap[fileId]] = result.content;
-                            } else {
-                                files[fileMap[fileId]] = result.content;
-                            }
-                        } catch (e) {
-                            console.error(`Error fetching ${fileMap[fileId]} for compile:`, e);
-                            // We continue, maybe it's not critical? Or should we fail?
-                            // Let's log but continue.
-                        } finally {
-                            completed++;
-                            updateProgress();
-                        }
-                    }));
-                }
+                // NEW: Use Zip Strategy
+                const { files, binaryFiles } = await this.fetchAndExtractZip(projectId);
 
                 btnCompile.innerHTML = '⚙️ Compilando...';
 
-                // 3. Send Payload
+                // Send Payload
                 const payload = {
                     projectId: projectId,
                     files: files,
                     binaryFiles: binaryFiles,
-                    engine: 'pdflatex', // Could be dynamic if we parsed settings
-                    mainFile: 'main.tex' // Server will auto-detect if missing, or we could try to guess
+                    engine: 'pdflatex',
+                    mainFile: 'main.tex' // Server auto-detects if missing
                 };
 
                 const response = await fetch(`${this.apiUrl}/compile`, {
@@ -371,12 +377,41 @@
             }
         }
 
+        async syncProject() {
+            const btnSync = document.getElementById('olc-sync-btn');
+            const originalText = btnSync.innerHTML;
+            btnSync.innerHTML = '⏳ Baixando ZIP...';
+            btnSync.disabled = true;
+
+            try {
+                const projectId = this.getProjectId();
+                const { files, binaryFiles } = await this.fetchAndExtractZip(projectId);
+
+                btnSync.innerHTML = '📤 Enviando...';
+
+                const response = await fetch(`${this.apiUrl}/sync`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId, files, binaryFiles })
+                });
+
+                if (!response.ok) throw new Error(await response.text());
+
+                const result = await response.json();
+                alert(`✅ Projeto Sincronizado!\n${result.message}`);
+
+            } catch (error) {
+                this.showErrorModal('Erro Sync', error.message);
+            } finally {
+                btnSync.innerHTML = originalText;
+                btnSync.disabled = false;
+            }
+        }
+
         showErrorModal(title, message) {
-            // Remove existing modal
             const existing = document.getElementById('olc-error-modal');
             if (existing) existing.remove();
 
-            // Overlay
             const overlay = document.createElement('div');
             overlay.id = 'olc-error-modal';
             overlay.style.position = 'fixed';
@@ -390,7 +425,6 @@
             overlay.style.justifyContent = 'center';
             overlay.style.alignItems = 'center';
 
-            // Modal
             const modal = document.createElement('div');
             modal.style.backgroundColor = '#fff';
             modal.style.padding = '20px';
@@ -402,26 +436,23 @@
             modal.style.flexDirection = 'column';
             modal.style.maxHeight = '80vh';
 
-            // Header
             const header = document.createElement('h3');
             header.innerText = title;
             header.style.marginTop = '0';
             header.style.color = '#d32f2f';
             modal.appendChild(header);
 
-            // Log Area
             const logArea = document.createElement('pre');
             logArea.innerText = message;
             logArea.style.backgroundColor = '#f5f5f5';
             logArea.style.padding = '10px';
             logArea.style.borderRadius = '4px';
-            logArea.style.overflow = 'auto'; // SCROLLABLE!
+            logArea.style.overflow = 'auto';
             logArea.style.flex = '1';
             logArea.style.fontSize = '12px';
             logArea.style.border = '1px solid #ddd';
             modal.appendChild(logArea);
 
-            // Buttons
             const btnGroup = document.createElement('div');
             btnGroup.style.marginTop = '15px';
             btnGroup.style.display = 'flex';
@@ -464,225 +495,6 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-        }
-
-        // =========================================================================
-        // SMART SYNC FEATURE
-        // =========================================================================
-
-        async syncProject() {
-            const btnSync = document.getElementById('olc-sync-btn');
-            const originalText = btnSync.innerHTML;
-            btnSync.innerHTML = '⏳ Lendo arquivos...';
-            btnSync.disabled = true;
-
-            try {
-                const projectId = this.getProjectId();
-                if (!projectId) throw new Error('Project ID not found in URL');
-
-                // 1. Parse File Tree
-                const fileMap = this.parseFileTree();
-                console.log('[OLC] Files found:', fileMap);
-
-                if (Object.keys(fileMap).length === 0) {
-                    throw new Error('Nenhum arquivo encontrado na árvore de arquivos. Abra as pastas para garantir que estão visíveis.');
-                }
-
-                btnSync.innerHTML = `0/${Object.keys(fileMap).length} Baixando...`;
-
-                // 2. Fetch all files (concurrency limited)
-                const files = {};
-                const binaryFiles = {};
-                const errors = [];
-
-                const fileIds = Object.keys(fileMap);
-                const total = fileIds.length;
-                let completed = 0;
-
-                // Simple concurrency queue of 5
-                const concurrency = 5;
-                for (let i = 0; i < total; i += concurrency) {
-                    const chunk = fileIds.slice(i, i + concurrency);
-                    await Promise.all(chunk.map(async (fileId) => {
-                        try {
-                            const result = await this.fetchFileContent(projectId, fileId);
-                            if (result.isBinary) {
-                                binaryFiles[fileMap[fileId]] = result.content;
-                            } else {
-                                files[fileMap[fileId]] = result.content;
-                            }
-                        } catch (err) {
-                            console.error(`Error fetching ${fileMap[fileId]}:`, err);
-                            errors.push(`${fileMap[fileId]}: ${err.message}`);
-                        } finally {
-                            completed++;
-                            btnSync.innerHTML = `${completed}/${total} Baixando...`;
-                        }
-                    }));
-                }
-
-                // 3. Send to Local Server
-                btnSync.innerHTML = '📤 Enviando...';
-
-                const payload = {
-                    projectId: projectId,
-                    files: files,
-                    binaryFiles: binaryFiles
-                };
-
-                const response = await fetch(`${this.apiUrl}/sync`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    const errText = await response.text();
-                    throw new Error(`Server error: ${errText}`);
-                }
-
-                const result = await response.json();
-                console.log('[OLC] Sync result:', result);
-
-                if (errors.length > 0) {
-                    alert(`Sincronização concluída com ${errors.length} erros:\n${errors.join('\n')}`);
-                } else {
-                    alert(`✅ Projeto Sincronizado com Sucesso!\nBackend: ${result.message}`);
-                }
-
-            } catch (error) {
-                console.error('[OLC] Sync Error:', error);
-                this.showErrorModal('Erro na Sincronização', error.message);
-            } finally {
-                btnSync.innerHTML = originalText;
-                btnSync.disabled = false;
-            }
-        }
-
-        parseFileTree() {
-            const files = {};
-
-            // Helper recursive function
-            const traverse = (element, currentPath) => {
-                // Find all immediate children that are items
-                const items = Array.from(element.children).filter(c =>
-                    c.tagName === 'LI' || c.classList.contains('file-tree-folder-list-inner')
-                );
-
-                // Handle the inner list wrapper if present
-                if (element.classList.contains('file-tree-folder-list') || element.classList.contains('file-tree-list')) {
-                    // Dig deeper into the list structure
-                    const innerList = element.querySelector('.file-tree-folder-list-inner');
-                    if (innerList) {
-                        Array.from(innerList.children).forEach(li => processLi(li, currentPath));
-                        return;
-                    }
-                }
-
-                // Fallback for direct traversal if structure varies
-                items.forEach(li => processLi(li, currentPath));
-            };
-
-            const processLi = (li, currentPath) => {
-                const entity = li.querySelector('.entity');
-                if (!entity) return;
-
-                const nameEl = entity.querySelector('.item-name-button span');
-                const name = nameEl ? nameEl.innerText : 'unknown';
-                const fileId = entity.getAttribute('data-file-id');
-                const type = entity.getAttribute('data-file-type'); // folder, doc, file
-
-                if (type === 'folder') {
-                    // It's a folder, find its UL child to recurse
-                    // The UL is usually a sibling of the entity div or inside the li
-                    const ul = li.nextElementSibling; // in some tree versions, UL is next sibling of LI? No, usually nested or sibling.
-                    // Based on user dump: 
-                    // <li ... role="treeitem">...<div class="entity">...</div></li>
-                    // <ul ... role="tree">...</ul> -- Wait, the dump shows UL as a SIBLING of the LI for the folder contents?
-                    // Let's look closely at the dump:
-                    // <li ... aria-label="1-pre-textuais">...</li>
-                    // <li ... aria-label="2-textuais">...</li>
-                    // <ul ...> ... children of 2-textuais ... </ul>
-                    // It seems recursive structure is flat list of LI followed by UL?
-                    // Or maybe standard nested. 
-
-                    // Actually looking at the dump:
-                    // <li ... aria-label="2-textuais">...</li>
-                    // <ul ...> ... </ul>
-                    // The UL seems to be the Next Sibling of the LI for that folder.
-                    // Let's verify by checking expanding logic.
-
-                    if (ul && ul.tagName === 'UL') {
-                        traverse(ul, currentPath ? `${currentPath}/${name}` : name);
-                    }
-                } else if (fileId) {
-                    // It's a file
-                    files[fileId] = currentPath ? `${currentPath}/${name}` : name;
-                }
-            };
-
-            // Start from root
-            // The root is usually .file-tree-list-root or .file-tree-list
-            const root = document.querySelector('.file-tree-list');
-            if (root) {
-                traverse(root, '');
-            } else {
-                console.error('[OLC] File tree root not found');
-            }
-
-            return files;
-        }
-
-        async fetchFileContent(projectId, fileId) {
-            const url = `https://www.overleaf.com/project/${projectId}/file/${fileId}`;
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-
-            const blob = await response.blob();
-
-            // Check if binary (image, pdf, etc) or text
-            // Simple heuristic: if type starts with image/ or application/pdf -> binary
-            // else text. 
-            // Better: read first few bytes or just treat everything as binary if we could, 
-            // but for editable text files we want them as text.
-
-            const isText = blob.type.startsWith('text/') ||
-                blob.type === 'application/x-tex' ||
-                blob.type === 'application/javascript' ||
-                blob.type === 'application/json' ||
-                blob.size < 1024 * 1024; // Small files assume text? Risk of corruption.
-
-            // Actually, let's try to read as text. If it contains null bytes, it's binary.
-            // But we need to deciding BEFORE reading fully if we want to optimize.
-            // Let's allow the server to handle encoding.
-            // But for transporting JSON, we need base64 for binaries.
-
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                    const res = reader.result;
-                    // res is string if readAsText, buffer if readAsArrayBuffer, dataUrl if readAsDataURL
-                    // Let's use readAsDataURL for everything to be safe? 
-                    // No, text is better for text files to edit locally.
-
-                    if (res.includes('base64,')) {
-                        resolve({ isBinary: true, content: res }); // Data URL
-                    } else {
-                        resolve({ isBinary: false, content: res }); // Text
-                    }
-                };
-                reader.onerror = reject;
-
-                // Heuristic:
-                if (blob.type.includes('image') || blob.type.includes('pdf') || blob.type.includes('zip')) {
-                    reader.readAsDataURL(blob);
-                } else {
-                    // Try text, if it fails fallback?
-                    // Let's default to Text for .tex, .bib, .cls, .sty, .txt, .md
-                    // And DataURL for everything else.
-                    reader.readAsText(blob);
-                }
-            });
         }
     }
 

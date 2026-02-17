@@ -31,6 +31,7 @@
         "firebase-auth.js",
         "firebase-firestore.js",
         "firebase-database.js",
+        "jszip.min.js",
         "content.js"
       ],
       "css": [
