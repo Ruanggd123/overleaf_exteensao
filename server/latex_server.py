@@ -376,67 +376,102 @@ def compile_real_logic():
             work_dir = Path(temp_dir)
             
             # Setup Cache/Arquivos (Simplificado para brevidade)
-            project_cache_path = PROJECTS_CACHE_DIR / project_id
-            if not project_cache_path.exists():
-                project_cache_path.mkdir(parents=True)
+            if is_zip:
+                # Save and extract ZIP
+                zip_path = work_dir / "project.zip"
+                uploaded_file.save(zip_path)
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(work_dir)
                 
-            # Escrever arquivos no cache e copiar para temp
-            for filename, content in files.items():
-                file_path = project_cache_path / filename
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-            
-            # Copiar tudo do cache para work_dir
-            shutil.copytree(project_cache_path, work_dir, dirs_exist_ok=True)
-            
-            # Compilar
-            cmd = [
-                engine,
-                '-interaction=batchmode',
-                '-file-line-error',
-                '-output-directory', str(work_dir),
-                main_file
-            ]
-            
-            # MiKTeX auto-install check
-            if os.name == 'nt':
-                 cmd.insert(1, '-enable-installer')
-            
-            result = subprocess.run(
-                cmd,
-                cwd=str(work_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=COMPILE_TIMEOUT
-            )
-            
-            pdf_filename = Path(main_file).stem + '.pdf'
-            pdf_path = work_dir / pdf_filename
-            
-            if pdf_path.exists():
-                with open(pdf_path, 'rb') as f:
-                    pdf_content = f.read()
-                
-                response = make_response(pdf_content)
-                response.headers['Content-Type'] = 'application/pdf'
-                response.headers['Content-Disposition'] = f'inline; filename={pdf_filename}'
-                return response
+                # Auto-detect main file if default doesn't exist
+                if not (work_dir / main_file).exists():
+                    # Try to find a .tex file with \documentclass
+                    tex_files = list(work_dir.glob('**/*.tex'))
+                    for tex_file in tex_files:
+                        try:
+                            content = tex_file.read_text(encoding='utf-8', errors='ignore')
+                            if '\\documentclass' in content:
+                                main_file = str(tex_file.relative_to(work_dir))
+                                break
+                        except:
+                            pass
             else:
-                # Batchmode suppresses stdout, read the log file
+                # Write individual files from JSON
+                for filename, content in files_data.items():
+                    file_path = work_dir / filename
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+
+            # Ensure we have a main file
+            if not (work_dir / main_file).exists():
+                 return jsonify({'error': f'Main file "{main_file}" not found in project.'}), 400
+
+            # Run LaTeX
+            pdf_filename = Path(main_file).stem + '.pdf'
+            
+            # Helper to run command
+            def run_latex():
+                cmd = [
+                    engine,
+                    '-interaction=batchmode',
+                    '-file-line-error',
+                    '-output-directory', str(work_dir),
+                    main_file
+                ]
+                # MiKTeX auto-install check
+                if os.name == 'nt':
+                    cmd.insert(1, '-enable-installer')
+                return subprocess.run(
+                    cmd,
+                    cwd=str(work_dir),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=COMPILE_TIMEOUT
+                )
+
+            # Run twice for references (bibtex handling could be added here)
+            result = run_latex()
+            
+            # Simple BibTeX handling: if .aux exists, try running bibtex
+            aux_file = work_dir / (Path(main_file).stem + '.aux')
+            if aux_file.exists():
+                subprocess.run(['bibtex', Path(main_file).stem], cwd=str(work_dir), timeout=10)
+                run_latex() # Re-run latex after bibtex
+                result = run_latex() # Final run
+
+            pdf_path = work_dir / pdf_filename
+
+            if pdf_path.exists():
+                # Read PDF logs just in case or for debug
+                with open(pdf_path, 'rb') as f:
+                    pdf_data = f.read()
+                
+                # Update stats (async/fire-and-forget ideally, but here sync is fine)
+                # update_usage_stats(user_id) 
+
+                return send_file(
+                    io.BytesIO(pdf_data),
+                    mimetype='application/pdf',
+                    as_attachment=True,
+                    download_name='output.pdf'
+                )
+            else:
+                # Look for log file
                 log_file = work_dir / (Path(main_file).stem + '.log')
+                log_content = ""
                 if log_file.exists():
                     with open(log_file, 'r', encoding='latin-1', errors='ignore') as f:
                         log_content = f.read()
                 else:
-                    log_content = result.stdout.decode('latin-1', errors='ignore') or "No log file found."
+                    log_content = result.stdout.decode('latin-1', errors='ignore') + "\n" + result.stderr.decode('latin-1', errors='ignore')
                 
                 return jsonify({'error': 'Compilation failed', 'logs': log_content}), 400
-                
+
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Compilation timed out'}), 504
+        return jsonify({'error': 'Compilation timed out'}), 408
     except Exception as e:
-        traceback.print_exc()
+        print(f"Server Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ==================================================================================

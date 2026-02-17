@@ -197,38 +197,22 @@
             toolbar.insertBefore(container, toolbar.firstChild);
         }
 
-        async extractFiles() {
-            // Simple extraction for now - relying on user to zip or sending main file text
-            // In a real scenario, we might need to use Overleaf's internal API or just scrape the editor content
-            // Capturing the current editor content:
-            let content = "";
+        getProjectId() {
+            const match = window.location.pathname.match(/\/project\/([a-f0-9]+)/);
+            return match ? match[1] : null;
+        }
 
-            // Try ACE editor (old)
-            if (window.ace) {
-                const editor = window.ace.edit("editor");
-                content = editor.getValue();
+        async fetchProjectZip(projectId) {
+            try {
+                const response = await fetch(`https://www.overleaf.com/project/${projectId}/download/zip`, {
+                    method: 'GET'
+                });
+                if (!response.ok) throw new Error('Failed to download project ZIP from Overleaf');
+                return await response.blob();
+            } catch (e) {
+                console.error('[OLC] Error fetching ZIP:', e);
+                throw e;
             }
-            // Try CodeMirror (new/source)
-            else if (document.querySelector('.cm-content')) {
-                // Better scraping for CM6
-                const lines = document.querySelectorAll('.cm-content .cm-line');
-                if (lines.length > 0) {
-                    content = Array.from(lines).map(line => line.textContent).join('\n');
-                } else {
-                    content = document.querySelector('.cm-content').innerText;
-                }
-            }
-            // Fallback: just a mock if we can't grab it easily without more permissions
-            else {
-                content = "% Could not grab editor content automatically.\n% Please ensure you are in the Source editor.";
-            }
-
-            console.log('[OLC] Extracted content length:', content.length);
-            // console.log('[OLC] Preview:', content.substring(0, 100));
-
-            return {
-                "main.tex": content
-            };
         }
 
         async compile(actionType = 'view') {
@@ -236,42 +220,46 @@
             const btnDownload = document.getElementById('olc-download-btn');
 
             const originalText = btnCompile.innerHTML;
-            btnCompile.innerHTML = '⏳ Enviando...';
+            btnCompile.innerHTML = '⏳ Enviando ZIP...';
             btnCompile.disabled = true;
             if (btnDownload) btnDownload.disabled = true;
 
             try {
-                const files = await this.extractFiles();
+                const projectId = this.getProjectId();
+                if (!projectId) throw new Error('Project ID not found in URL');
+
+                console.log('[OLC] Fetching ZIP for project:', projectId);
+                const zipBlob = await this.fetchProjectZip(projectId);
+
+                btnCompile.innerHTML = '⚙️ Compilando...';
+
+                // Create FormData
+                const formData = new FormData();
+                formData.append('source_zip', zipBlob, 'project.zip');
+                formData.append('engine', 'pdflatex'); // Default, could be configurable
 
                 const response = await fetch(`${this.apiUrl}/compile`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
                         'Authorization': `Bearer ${this.authToken}`
+                        // Content-Type is set automatically with FormData
                     },
-                    body: JSON.stringify({
-                        files,
-                        mainFile: 'main.tex',
-                        engine: 'pdflatex'
-                    })
+                    body: formData
                 });
 
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
-                    const msg = error.error || 'Server error';
-                    const logs = error.logs ? '\n\nLogs:\n' + error.logs : '';
-                    throw new Error(msg + logs);
+                    const logContent = error.logs || error.error || 'Erro desconhecido no servidor';
+                    throw new Error(logContent);
                 }
 
-                // const data = await response.json(); // It returns a PDF blob, not JSON unless error
-                // The server returns raw PDF bytes usually
                 const blob = await response.blob();
 
-                // Check if it's actually a JSON error hidden as blob
                 if (blob.type === 'application/json') {
+                    // Sometimes error comes as json with 200 ok (rare but possible in some proxies)
                     const text = await blob.text();
-                    const json = JSON.parse(text);
-                    throw new Error(json.error || 'Unknown error');
+                    const error = JSON.parse(text);
+                    throw new Error(error.logs || error.error);
                 }
 
                 if (actionType === 'download') {
@@ -282,7 +270,7 @@
 
             } catch (error) {
                 console.error(error);
-                this.showErrorModal('Erro na compilação', error.message);
+                this.showErrorModal('Erro na Compilação', error.message);
             } finally {
                 btnCompile.innerHTML = originalText;
                 btnCompile.disabled = false;
