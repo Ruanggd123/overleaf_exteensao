@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: overleaf-hybrid-compiler
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: LATEX_ENGINE
+        value: pdflatex
+      - key: COMPILE_TIMEOUT
+        value: 120
+      - key: MAX_REQUEST_SIZE
+        value: 30
+      - key: AUTH_TOKEN
+        generateValue: true  # Gera automaticamente
+    healthCheckPath: /status
+    plan: free  # 750h/mês grátis

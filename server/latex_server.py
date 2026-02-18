@@ -1,655 +1,472 @@
+#!/usr/bin/env python3
+"""
+Overleaf Hybrid Compiler - Servidor LaTeX
+Roda em: Railway/Render (cloud) ou Localhost (desenvolvimento)
+Free tier: Railway ($5/mês grátis) ou Render (750h/mês grátis)
+"""
+
 import os
 import sys
-import subprocess
-import tempfile
-import shutil
-import uuid
-import logging
-import json
-import time
-import zipfile
 import io
+import shutil
+import tempfile
+import zipfile
+import subprocess
 import traceback
-import threading
+import json
+import hashlib
 from pathlib import Path
-import requests
-import firebase_admin
-from firebase_admin import credentials, auth, db
-from flask import Flask, request, jsonify, send_file, render_template, make_response
+from functools import wraps
+from datetime import datetime
+
+from flask import Flask, request, send_file, jsonify, render_template_string
 from flask_cors import CORS
-import base64
 
-# Configuração de Logs
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+# ═══════════════════════════════════════════════════════════════════
+#  Configuration (Auto-detecta ambiente)
+# ═══════════════════════════════════════════════════════════════════
 
-# Inicializar Flask
-app = Flask(__name__, template_folder='templates')
-CORS(app)
+IS_CLOUD = os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RENDER')
+PORT = int(os.environ.get('PORT', '8765'))
+HOST = '0.0.0.0'
 
-# ==================================================================================
-#  ROUTES
-# ==================================================================================
+# LaTeX Configuration
+SUPPORTED_ENGINES = ['pdflatex', 'xelatex', 'lualatex']
+DEFAULT_ENGINE = os.environ.get('LATEX_ENGINE', 'pdflatex')
+BIBTEX_CMD = os.environ.get('BIBTEX_CMD', 'bibtex')
+COMPILE_TIMEOUT = int(os.environ.get('COMPILE_TIMEOUT', '300'))
 
-@app.route('/register', methods=['GET'])
-def register_page():
-    return render_template('register.html')
+# Security
+AUTH_TOKEN = os.environ.get('AUTH_TOKEN')  # Obrigatório em produção cloud
+MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', '50'))  # MB
 
-@app.route('/api/status', methods=['GET'])
-def server_status():
+# Cache/Persistence
+if IS_CLOUD:
+    # Cloud: usa /tmp (ephemeral) ou volume persistente se configurado
+    CACHE_DIR = os.environ.get('PERSISTENT_STORAGE', '/tmp/latex-cache')
+else:
+    # Local: pasta persistente no projeto
+    CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
+
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+app = Flask(__name__)
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",  # Em produção, restrinja via AUTH_TOKEN
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Authorization", "Content-Type"]
+    }
+})
+
+app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE * 1024 * 1024
+
+# ═══════════════════════════════════════════════════════════════════
+#  Security & Error Handling
+# ═══════════════════════════════════════════════════════════════════
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    tb = traceback.format_exc()
+    print(f'[ERROR] {e}')
+    print(tb)
     return jsonify({
-        'status': 'online', 
-        'mode': 'hybrid-saas' if FIREBASE_INITIALIZED else 'offline-local',
-        'version': '2.2.0'
+        'error': f'Erro interno: {str(e)}',
+        'log': tb[-3000:] if os.environ.get('DEBUG') else 'Erro interno do servidor'
+    }), 500
+
+@app.errorhandler(413)
+def handle_too_large(e):
+    return jsonify({'error': f'Arquivo muito grande (limite: {MAX_REQUEST_SIZE}MB).'}), 413
+
+def require_auth(f):
+    """Decorator para exigir autenticação em cloud."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if IS_CLOUD and AUTH_TOKEN:
+            auth = request.headers.get('Authorization')
+            if not auth or auth != f'Bearer {AUTH_TOKEN}':
+                return jsonify({'error': 'Unauthorized - Token inválido'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ═══════════════════════════════════════════════════════════════════
+#  Utility Functions
+# ═══════════════════════════════════════════════════════════════════
+
+def detect_available_engines():
+    """Detecta motores LaTeX disponíveis."""
+    available = []
+    for eng in SUPPORTED_ENGINES:
+        if shutil.which(eng):
+            available.append(eng)
+    return available
+
+def find_main_file(directory):
+    """Encontra arquivo .tex principal."""
+    tex_files = list(Path(directory).rglob('*.tex'))
+    
+    if not tex_files:
+        return None
+    
+    # Prioridade: main.tex na raiz
+    for f in tex_files:
+        if f.name.lower() == 'main.tex' and f.parent == Path(directory):
+            return str(f.relative_to(directory))
+    
+    # Qualquer main.tex
+    for f in tex_files:
+        if f.name.lower() == 'main.tex':
+            return str(f.relative_to(directory))
+    
+    # Arquivo com \documentclass
+    for f in tex_files:
+        try:
+            content = f.read_text(encoding='utf-8', errors='ignore')
+            if '\\documentclass' in content:
+                return str(f.relative_to(directory))
+        except Exception:
+            continue
+    
+    # Fallback: primeiro .tex
+    return str(tex_files[0].relative_to(directory))
+
+def get_project_cache_dir(project_id):
+    """Retorna diretório de cache para um projeto."""
+    if not project_id:
+        return None
+    # Hash para evitar path traversal
+    safe_id = hashlib.sha256(project_id.encode()).hexdigest()[:16]
+    return os.path.join(CACHE_DIR, safe_id)
+
+def compile_project(directory, main_file, engine=None, project_id=None):
+    """
+    Pipeline de compilação LaTeX.
+    """
+    engine = engine if engine in SUPPORTED_ENGINES else DEFAULT_ENGINE
+    
+    if not shutil.which(engine):
+        return {
+            'success': False,
+            'log': f'Motor LaTeX "{engine}" não encontrado.',
+        }
+    
+    main_path = os.path.join(directory, main_file)
+    if not os.path.isfile(main_path):
+        return {
+            'success': False,
+            'log': f'Arquivo principal não encontrado: {main_file}',
+        }
+    
+    work_dir = os.path.dirname(main_path) or directory
+    main_basename = os.path.basename(main_file)
+    
+    base_cmd = [engine, '-interaction=nonstopmode', '-file-line-error',
+                '-enable-installer', main_basename]
+    
+    env = os.environ.copy()
+    env['MIKTEX_ENABLEINSTALLER'] = 't'
+    env['TEXMFVAR'] = '/tmp/texmf-var'
+    
+    full_log = ''
+    print(f'[Compile] Engine: {engine}, Main: {main_file}, Project: {project_id}')
+    
+    try:
+        # Passo 1
+        print('[Compile] Pass 1...')
+        r1 = subprocess.run(
+            base_cmd, cwd=work_dir, capture_output=True, text=True,
+            timeout=COMPILE_TIMEOUT, env=env,
+        )
+        full_log += r1.stdout + '\n' + r1.stderr
+        
+        needs_bib = False
+        needs_rerun = 'Rerun to get cross-references right' in r1.stdout
+        
+        aux_path = os.path.join(work_dir, os.path.splitext(main_basename)[0] + '.aux')
+        if os.path.isfile(aux_path):
+            try:
+                aux_content = open(aux_path, 'r', encoding='utf-8', errors='ignore').read()
+                needs_bib = '\\citation' in aux_content or '\\bibdata' in aux_content
+            except Exception:
+                pass
+        
+        # BibTeX
+        if needs_bib and shutil.which(BIBTEX_CMD):
+            bib_base = os.path.splitext(main_basename)[0]
+            print('[Compile] Running BibTeX...')
+            rb = subprocess.run(
+                [BIBTEX_CMD, bib_base], cwd=work_dir, capture_output=True,
+                text=True, timeout=60, env=env,
+            )
+            full_log += '\n--- BibTeX ---\n' + rb.stdout + '\n' + rb.stderr
+            needs_rerun = True
+        
+        # Passos 2 e 3
+        if needs_rerun:
+            for i in range(2):
+                print(f'[Compile] Pass {i + 2}...')
+                ri = subprocess.run(
+                    base_cmd, cwd=work_dir, capture_output=True, text=True,
+                    timeout=COMPILE_TIMEOUT, env=env,
+                )
+                full_log += f'\n--- Pass {i + 2} ---\n' + ri.stdout + '\n' + ri.stderr
+                if 'Rerun to get cross-references right' not in ri.stdout:
+                    break
+        
+        # Verificar resultado
+        actual_pdf = os.path.join(work_dir, os.path.splitext(main_basename)[0] + '.pdf')
+        if os.path.isfile(actual_pdf):
+            size_mb = os.path.getsize(actual_pdf) / (1024 * 1024)
+            print(f'[Compile] [OK] PDF gerado ({size_mb:.1f} MB)')
+            return {
+                'success': True, 
+                'pdf_path': actual_pdf, 
+                'log': full_log
+            }
+        else:
+            print('[Compile] [ERR] PDF não gerado')
+            return {'success': False, 'log': full_log}
+            
+    except subprocess.TimeoutExpired:
+        return {'success': False, 'log': f'Timeout ({COMPILE_TIMEOUT}s) expirado.'}
+    except Exception as e:
+        return {'success': False, 'log': f'Erro: {str(e)}'}
+
+# ═══════════════════════════════════════════════════════════════════
+#  Endpoints
+# ═══════════════════════════════════════════════════════════════════
+
+LANDING_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Overleaf Hybrid Compiler</title>
+    <style>
+        body { 
+            font-family: system-ui, -apple-system, sans-serif; 
+            max-width: 800px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+        .status { 
+            padding: 20px; 
+            border-radius: 12px; 
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            border: 1px solid #475569;
+        }
+        .ok { color: #22c55e; }
+        .warning { color: #f59e0b; }
+        code { 
+            background: #1e293b; 
+            padding: 2px 6px; 
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .env-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .env-cloud { background: #3b82f6; color: white; }
+        .env-local { background: #10b981; color: white; }
+        h1 { margin-bottom: 8px; }
+        .subtitle { color: #94a3b8; margin-bottom: 24px; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Overleaf Hybrid Compiler</h1>
+    <div class="subtitle">Compilador LaTeX para Overleaf - Online & Local</div>
+    
+    <div class="status">
+        <span class="env-badge {{ 'env-cloud' if is_cloud else 'env-local' }}">
+            {{ '☁️ MODO CLOUD' if is_cloud else '🖥️ MODO LOCAL' }}
+        </span>
+        
+        <h2>Status do Servidor</h2>
+        <p><strong>Status:</strong> <span class="ok">✓ Online</span></p>
+        <p><strong>Motores disponíveis:</strong> {{ engines|join(', ') }}</p>
+        <p><strong>Versão:</strong> 2.1.0-hybrid</p>
+        <p><strong>Cache:</strong> <code>{{ cache_dir }}</code></p>
+    </div>
+    
+    <h2>Endpoints</h2>
+    <ul>
+        <li><code>GET /status</code> - Health check</li>
+        <li><code>POST /compile</code> - Compilar arquivos JSON</li>
+        <li><code>POST /compile-zip</code> - Compilar ZIP</li>
+    </ul>
+    
+    <h2>Configuração Extensão Chrome</h2>
+    <p>URL do servidor: <code>{{ server_url }}</code></p>
+    {% if auth_token %}
+    <p>Token de acesso: <code>{{ auth_token[:8] }}...</code> (configurado)</p>
+    {% else %}
+    <p class="warning">⚠️ Sem token de autenticação (apenas local)</p>
+    {% endif %}
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    """Página inicial com status."""
+    engines = detect_available_engines()
+    server_url = request.host_url.rstrip('/')
+    
+    return render_template_string(
+        LANDING_PAGE,
+        is_cloud=IS_CLOUD,
+        engines=engines,
+        cache_dir=CACHE_DIR,
+        server_url=server_url,
+        auth_token=AUTH_TOKEN
+    )
+
+@app.route('/status', methods=['GET'])
+def status():
+    """Health check endpoint."""
+    engines = detect_available_engines()
+    return jsonify({
+        'status': 'ok',
+        'engines': engines,
+        'default_engine': DEFAULT_ENGINE,
+        'compile_timeout': COMPILE_TIMEOUT,
+        'is_cloud': bool(IS_CLOUD),
+        'version': '2.1.0-hybrid',
+        'timestamp': datetime.utcnow().isoformat()
     })
 
-@app.route('/', methods=['GET'])
-def root_status():
-    return jsonify({'message': 'Overleaf Pro Server Running'})
-
-
-# ==================================================================================
-#  FIREBASE ADMIN SETUP (SaaS Logic Local)
-# ==================================================================================
-FIREBASE_INITIALIZED = False
-db = None
-auth = None
-
-
-
-def initialize_firebase():
-    global FIREBASE_INITIALIZED, db, auth
+@app.route('/compile', methods=['POST'])
+@require_auth
+def compile_latex():
+    """Compilar arquivos .tex enviados como JSON."""
+    data = request.get_json(force=True)
+    files = data.get('files', {})
+    main_file = data.get('mainFile', 'main.tex')
+    engine = data.get('engine', DEFAULT_ENGINE)
+    project_id = data.get('projectId')
+    
+    if not files:
+        return jsonify({'error': 'Nenhum arquivo recebido.'}), 400
+    
+    # Determinar diretório de trabalho
+    if project_id:
+        work_dir = get_project_cache_dir(project_id)
+        os.makedirs(work_dir, exist_ok=True)
+    else:
+        work_dir = tempfile.mkdtemp(dir='/tmp' if IS_CLOUD else None, prefix='olc_')
     
     try:
-        import firebase_admin
-        from firebase_admin import credentials, auth as firebase_auth_module, db as rtdb_module
-        import base64
-        import json
-        
-        cred_path = Path("serviceAccountKey.json")
-        cred = None
-
-        # Credential Loading Logic:
-        # 1. Local JSON File (Best for Local Dev)
-        if cred_path.exists():
-            cred = credentials.Certificate(str(cred_path))
-            logger.info("[OK] Firebase credentials loaded from JSON file")
-            
-        # 2. Environment Variable (Best for Cloud)
-        elif os.environ.get('FIREBASE_CREDENTIALS'):
-            try:
-                cred_dict = json.loads(os.environ.get('FIREBASE_CREDENTIALS'))
-                cred = credentials.Certificate(cred_dict)
-                logger.info("[OK] Firebase credentials loaded from ENV")
-            except Exception as e:
-                logger.error(f"[ERROR] Failed to parse FIREBASE_CREDENTIALS env var: {e}")
-
-        # 3. Base64 Encoded File (Legacy/Bypass)
-        elif Path("firebase_secret.encoded").exists():
-            try:
-                with open("firebase_secret.encoded", "r") as f:
-                    b64_str = f.read().strip()
-                json_str = base64.b64decode(b64_str).decode('utf-8')
-                cred_dict = json.loads(json_str)
-                cred = credentials.Certificate(cred_dict)
-                logger.info("[OK] Firebase credentials loaded from Encoded file")
-            except Exception as e:
-                logger.error(f"Failed to decode secret: {e}")
-
-        if cred:
-            # Check if already initialized to avoid error
-            if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred, {
-                    'databaseURL': 'https://extensao-asdsadas1q-default-rtdb.firebaseio.com'
-                })
-            
-            db = rtdb_module # Usando Realtime Database
-            auth = firebase_auth_module 
-            FIREBASE_INITIALIZED = True
-            logger.info("[OK] Firebase Admin (RTDB) initialized successfully!")
-        else:
-            logger.warning("[WARNING] No valid credentials found. Switching to OFFLINE MODE (No Auth/Credits).")
-            FIREBASE_INITIALIZED = False
-            
-    except ImportError:
-        logger.error("[ERROR] firebase-admin not installed. SaaS mode disabled.")
-        FIREBASE_INITIALIZED = False
-    except Exception as e:
-        logger.error(f"[ERROR] Error initializing Firebase: {str(e)}")
-        FIREBASE_INITIALIZED = False
-
-initialize_firebase()
-
-# ==================================================================================
-#  CONFIGURAÇÕES DO SERVIDOR
-# ==================================================================================
-PORT = int(os.environ.get('PORT', 8765))
-COMPILE_TIMEOUT = int(os.environ.get('COMPILE_TIMEOUT', 300))
-MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
-PROJECTS_CACHE_DIR = Path("projects_cache")
-
-# ==================================================================================
-#  SISTEMA DE CRÉDITOS (NOVO)
-# ==================================================================================
-
-# Planos com Créditos Iniciais (Mensal ou Único)
-PLANS = {
-    'free': {'initialCredits': 10, 'name': 'Gratuito'},
-    'basic': {'initialCredits': 100, 'name': 'Básico'},
-    'pro': {'initialCredits': 1000, 'name': 'Profissional'},
-    'unlimited': {'initialCredits': 999999, 'name': 'Ilimitado'}
-}
-
-# ==================================================================================
-#  MIDDLEWARES & HELPERS
-# ==================================================================================
-
-def check_auth(f):
-    """Decorator para verificar JWT do Firebase em endpoints protegidos."""
-    def wrapper(*args, **kwargs):
-        # --- OFFLINE/LOCAL DEV MODE ---
-        if not FIREBASE_INITIALIZED:
-            # Bypass auth check completely for local dev
-            logger.info("Bypassing auth check (Offline Mode)")
-            request.user = {'uid': 'local_dev_user', 'email': 'local@dev.com'}
-            return f(*args, **kwargs)
-        # ------------------------------
-        
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Token não fornecido'}), 401
-        
-        token = auth_header.split('Bearer ')[1]
-        try:
-            decoded_token = auth.verify_id_token(token)
-            request.user = decoded_token
-            return f(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"Auth falhou: {e}")
-            return jsonify({'error': 'Token inválido'}), 401
-    
-    wrapper.__name__ = f.__name__
-    return wrapper
-
-def get_user_subscription(uid):
-    """Busca assinatura ativa do RTDB."""
-    try:
-        # Estrutura simplificada: users/{uid}/subscription
-        ref = db.reference(f'users/{uid}/subscription')
-        sub_data = ref.get()
-        
-        if sub_data and sub_data.get('status') == 'active':
-             # Check expiration
-             expires_at = sub_data.get('expiresAt')
-             # Simple checking if needed, or trust DB
-             return sub_data
-
-        return {'plan': 'free', 'status': 'expired'}
-    except Exception as e:
-        logger.error(f"Erro ao buscar assinatura: {e}")
-        return {'plan': 'free', 'status': 'error'}
-
-
-def get_user_credits(uid):
-    """Retorna créditos restantes do usuário."""
-    try:
-        # Estrutura: users/{uid}/credits
-        ref = db.reference(f'users/{uid}/credits')
-        current_credits = ref.get()
-        
-        if current_credits is None:
-            # Se não tiver, define inicial do plano Free (migração)
-            current_credits = PLANS['free']['initialCredits']
-            ref.set(current_credits)
-            
-        return int(current_credits)
-    except Exception as e:
-        logger.error(f"Erro ao buscar créditos: {e}")
-        return 0
-
-def consume_credit(uid):
-    """Consome 1 crédito. Retorna True se sucesso, False se sem saldo."""
-    if not FIREBASE_INITIALIZED:
-        return True, 999999 # Always succeed in offline mode
-
-    try:
-        ref = db.reference(f'users/{uid}/credits')
-        
-        def transaction_deduct(current_val):
-            if current_val is None:
-                return PLANS['free']['initialCredits'] - 1
-            
-            if current_val > 0:
-                return current_val - 1
-            else:
-                return -1 # Sinal de sem crédito (abort transaction logic custom)
-        
-        current = ref.get()
-        if current is None:
-            current = PLANS['free']['initialCredits']
-            
-        if current > 0:
-             ref.set(current - 1)
-             return True, current - 1
-        else:
-             return False, 0
-             
-    except Exception as e:
-        logger.error(f"Erro ao consumir crédito: {e}")
-        return False, 0
-
-# ==================================================================================
-#  API ENDPOINTS (SaaS)
-# ==================================================================================
-
-@app.route('/api/auth/sync', methods=['POST'])
-@check_auth
-def api_auth_sync():
-    """Sincroniza usuário e cria trial se necessário."""
-    try:
-        # --- OFFLINE MODE ---
-        if not FIREBASE_INITIALIZED:
-           return jsonify({'message': 'Sincronizado (Offline Mock)', 'isNew': False})
-        # --------------------
-
-        uid = request.user['uid']
-        email = request.user.get('email')
-        data = request.json or {}
-        hardware_id = data.get('hardwareId')
-        
-        user_ref = db.reference(f'users/{uid}')
-        user_data = user_ref.get()
-        
-        is_new = False
-        if not user_data:
-            is_new = True
-            
-            # Setup Trial Dates
-            from datetime import datetime, timedelta
-            expires = (datetime.utcnow() + timedelta(days=1)).isoformat()
-            
-            # Create User + Subscription Atomically
-            user_ref.set({
-                'email': email,
-                'plan': 'free',
-                'createdAt': int(time.time() * 1000),
-                'lastLogin': int(time.time() * 1000),
-                'hardwareFingerprint': hardware_id,
-                'credits': PLANS['free']['initialCredits'], # Novo: Créditos Iniciais
-                'subscription': {
-                    'plan': 'free',
-                    'status': 'active',
-                    'isTrial': True,
-                    'startedAt': int(time.time() * 1000),
-                    'expiresAt': expires
-                }
-            })
-        else:
-            user_ref.update({'lastLogin': int(time.time() * 1000)})
-            
-        return jsonify({'message': 'Sincronizado', 'isNew': is_new})
-        
-    except Exception as e:
-        logger.error(f"Erro /auth/sync: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/user/me', methods=['GET'])
-@check_auth
-def api_user_me():
-    """Retorna dados do usuário e créditos."""
-    try:
-        # --- OFFLINE MODE ---
-        if not FIREBASE_INITIALIZED:
-             return jsonify({
-                'user': {'email': 'local@dev.com'},
-                'subscription': {
-                    'plan': 'local-dev',
-                    'status': 'active',
-                    'credits': 999999,
-                    'dailyLimit': 999999,
-                    'dailyUsed': 0,
-                    'dailyRemaining': 999999
-                }
-            })
-        # --------------------
-
-        uid = request.user['uid']
-        user_ref = db.reference(f'users/{uid}')
-        user_data = user_ref.get()
-        
-        if not user_data:
-            return jsonify({'error': 'Usuário não encontrado'}), 404
-            
-        sub = user_data.get('subscription', {'plan': 'free', 'status': 'expired'})
-        plan = sub.get('plan', 'free')
-        
-        # Busca créditos
-        credits = user_data.get('credits', 0)
-        
-        return jsonify({
-            'user': {'email': user_data.get('email')},
-            'subscription': {
-                'plan': plan,
-                'status': sub.get('status'),
-                'credits': credits, # Novo campo
-                # Campos antigos para compatibilidade (opcional)
-                'dailyLimit': credits, 
-                'dailyUsed': 0,
-                'dailyRemaining': credits
-            }
-        })
-    except Exception as e:
-        logger.error(f"Erro /user/me: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/subscription/purchase', methods=['POST'])
-@check_auth
-def api_purchase():
-    """Simula compra de pacotes de créditos/plano."""
-    try:
-        if not FIREBASE_INITIALIZED:
-            return jsonify({'success': True, 'message': 'Offline Mock Purchase'})
-
-        uid = request.user['uid']
-        plan = request.json.get('plan', 'pro')
-        
-        credits_to_add = PLANS.get(plan, PLANS['free'])['initialCredits']
-        
-        user_ref = db.reference(f'users/{uid}')
-        # Transactional add
-        def add_credits(current_val):
-            if current_val is None: return {'credits': credits_to_add}
-            # Se for dict (nó user), atualiza credits
-            current_credits = current_val.get('credits', 0)
-            current_val['credits'] = current_credits + credits_to_add
-            
-            # Atualiza subscription metadata
-            current_val['plan'] = plan
-            current_val['subscription'] = {
-                'plan': plan,
-                'status': 'active',
-                'paymentMethod': 'simulated_credit_pack'
-            }
-            return current_val
-
-        user_ref.transaction(add_credits)
-        
-        return jsonify({
-            'success': True, 
-            'message': f'Pacote {plan} ativado! +{credits_to_add} créditos.'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/compile', methods=['POST'])
-@check_auth
-def api_compile():
-    """API de Compilação Protegida (SaaS) com Créditos."""
-    uid = request.user['uid']
-    
-    # 1. Tentar Consumir Crédito (ignorado se offline)
-    success, new_balance = consume_credit(uid)
-    
-    if not success:
-        return jsonify({
-            'error': 'Você está sem créditos. Adquira mais para continuar compilando.',
-            'code': 'NO_CREDITS' # Código específico para o frontend
-        }), 403
-        
-    # 2. Encaminhar para lógica real de compilação
-    return compile_real_logic()
-
-@app.route('/api/sync', methods=['POST'])
-# @check_auth # Start open for ease of use, can enable later
-def api_sync_files():
-    """Receives individual files and saves them to a local folder."""
-    try:
-        data = request.json
-        project_id = data.get('projectId', 'unknown_project')
-        files = data.get('files', {}) # { "path/to/file.tex": "content" }
-        binary_files = data.get('binaryFiles', {}) # { "path/to/image.png": "base64_string" }
-        
-        # Determine target directory
-        # We can use a 'Synced_Projects' folder in the server directory, or user home
-        # For now, let's put it in "Synced_Projects" relative to where server runs
-        target_dir = Path("Synced_Projects") / project_id
-        target_dir.mkdir(parents=True, exist_ok=True)
-        
-        saved_count = 0
-        
-        # Save Text Files
-        for rel_path, content in files.items():
-            safe_path = Path(rel_path)
-            if safe_path.is_absolute() or '..' in str(safe_path):
-                continue # Security check
-                
-            file_path = target_dir / safe_path
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, 'w', encoding='utf-8') as f:
+        # Escrever arquivos
+        for filename, content in files.items():
+            filepath = os.path.join(work_dir, filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
-            saved_count += 1
-            
-        # Save Binary Files
-        for rel_path, b64_content in binary_files.items():
-            safe_path = Path(rel_path)
-            if safe_path.is_absolute() or '..' in str(safe_path):
-                continue
-                
-            file_path = target_dir / safe_path
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                # Remove header if present (e.g. "data:image/png;base64,...")
-                if ',' in b64_content:
-                    b64_content = b64_content.split(',')[1]
-                
-                with open(file_path, 'wb') as f:
-                    f.write(base64.b64decode(b64_content))
-                saved_count += 1
-            except Exception as bin_err:
-                logger.error(f"Error saving binary {rel_path}: {bin_err}")
-            
-        logger.info(f"Synced {saved_count} files for project {project_id}")
-        return jsonify({'success': True, 'message': f'Synced {saved_count} files to {target_dir.absolute()}'})
-
-    except Exception as e:
-        logger.error(f"Sync error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# ==================================================================================
-#  LÓGICA DE COMPILAÇÃO (Herdada da v2)
-# ==================================================================================
-
-def compile_real_logic():
-    """Lógica ROBUSTA de compilação (BibTeX + Multi-pass) integrada à API."""
-    try:
-        # Check if JSON or Form Data
-        is_json = request.is_json
         
-        main_file = 'main.tex'
-        engine = 'pdflatex'
-        project_id = 'temp_project'
-        files_data = {}
-        binary_files_data = {}
+        result = compile_project(work_dir, main_file, engine, project_id)
         
-        if is_json:
-            data = request.json
-            files_data = data.get('files', {})
-            binary_files_data = data.get('binaryFiles', {})
-            main_file = data.get('mainFile', 'main.tex')
-            engine = data.get('engine', 'pdflatex')
-            project_id = data.get('projectId', 'temp_project')
-        else:
-            # Fallback for Form Data
-            if 'source_zip' in request.files:
-                return jsonify({'error': 'Please use JSON format with individual files. ZIP upload is deprecated in this mode.'}), 415
+        if result['success']:
+            with open(result['pdf_path'], 'rb') as f:
+                pdf_data = io.BytesIO(f.read())
             
-            data = request.form
-            main_file = data.get('mainFile', 'main.tex')
-            engine = data.get('engine', 'pdflatex')
-
-        # Use temp directory for compilation
-        with tempfile.TemporaryDirectory() as temp_dir:
-            work_dir = Path(temp_dir)
-            
-            # 1. Write Text Files
-            for filename, content in files_data.items():
-                file_path = work_dir / filename
-                if file_path.is_absolute(): continue
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-
-            # 2. Write Binary Files
-            for filename, b64_content in binary_files_data.items():
-                file_path = work_dir / filename
-                if file_path.is_absolute(): continue
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    if ',' in b64_content:
-                        b64_content = b64_content.split(',')[1]
-                    with open(file_path, 'wb') as f:
-                        f.write(base64.b64decode(b64_content))
-                except Exception as e:
-                    logger.error(f"Error writing binary file {filename}: {e}")
-
-            # 3. Ensure we have a main file
-            if not (work_dir / main_file).exists():
-                 # Auto-detect
-                 tex_files = list(work_dir.glob('**/*.tex'))
-                 found = False
-                 for tex_file in tex_files:
-                     try:
-                         content = tex_file.read_text(encoding='utf-8', errors='ignore')
-                         if '\\documentclass' in content:
-                             main_file = str(tex_file.relative_to(work_dir))
-                             found = True
-                             break
-                     except:
-                         pass
-                 
-                 if not found and tex_files:
-                      main_file = str(tex_files[0].relative_to(work_dir))
-                      found = True
-
-                 if not found:
-                     return jsonify({'error': f'Main file "{main_file}" not found and auto-detection failed.'}), 400
-
-            # 4. Compilation Pipeline
-            full_log = ""
-            
-            # Setup Command
-            base_cmd = [
-                engine,
-                '-interaction=nonstopmode',
-                '-file-line-error',
-                '-output-directory', str(work_dir),
-                main_file
-            ]
-            
-            if os.name == 'nt':
-                 # Avoid interactive prompts on Windows
-                 os.environ['MIKTEX_ENABLEINSTALLER'] = 't' # Try to auto-install packages
-
-            logger.info(f"Compiling {main_file} with {engine}...")
-
-            # --- Pass 1 ---
-            try:
-                r1 = subprocess.run(
-                    base_cmd,
-                    cwd=str(work_dir),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=COMPILE_TIMEOUT,
-                    encoding='latin-1', errors='replace' # Use latin-1 for broad compatibility
-                )
-                full_log += f"--- Pass 1 ---\n{r1.stdout}\n{r1.stderr}\n"
-            except subprocess.TimeoutExpired:
-                 return jsonify({'error': 'Compilation timed out (Pass 1)'}), 408
-
-            # --- Check BibTeX ---
-            aux_file = work_dir / (Path(main_file).stem + '.aux')
-            needs_bib = False
-            if aux_file.exists():
-                try:
-                    aux_content = aux_file.read_text(encoding='latin-1', errors='ignore')
-                    if '\\citation' in aux_content or '\\bibdata' in aux_content:
-                        needs_bib = True
-                except: pass
-
-            if needs_bib:
-                logger.info("Running BibTeX...")
-                try:
-                    rb = subprocess.run(
-                        ['bibtex', Path(main_file).stem],
-                        cwd=str(work_dir),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        timeout=30,
-                        encoding='latin-1', errors='replace'
-                    )
-                    full_log += f"--- BibTeX ---\n{rb.stdout}\n{rb.stderr}\n"
-                except FileNotFoundError:
-                    full_log += "\n[WARN] BibTeX not found/installed.\n"
-                except Exception as e:
-                    full_log += f"\n[WARN] BibTeX error: {e}\n"
-
-            # --- Pass 2 & 3 (if needed) ---
-            # We always run at least one more pass if we ran bibtex, or if requested
-            # For robustness, let's run Pass 2 always, and Pass 3 if "Rerun" in logs
-            
-            logger.info("Running Pass 2...")
-            r2 = subprocess.run(
-                base_cmd,
-                cwd=str(work_dir),
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                timeout=COMPILE_TIMEOUT,
-                encoding='latin-1', errors='replace'
+            response = send_file(
+                pdf_data,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name='output.pdf'
             )
-            full_log += f"--- Pass 2 ---\n{r2.stdout}\n{r2.stderr}\n"
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+        else:
+            return jsonify({
+                'error': 'Compilação falhou.',
+                'log': result['log'][-5000:]
+            }), 500
+            
+    finally:
+        # Cleanup se não estiver usando cache persistente
+        if not project_id and not IS_CLOUD:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
-            # Check for Rerun
-            if 'Rerun to get cross-references right' in r2.stdout or 'There were undefined references' in r2.stdout:
-                logger.info("Running Pass 3 (Rerun requested)...")
-                r3 = subprocess.run(
-                    base_cmd,
-                    cwd=str(work_dir),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=COMPILE_TIMEOUT,
-                    encoding='latin-1', errors='replace'
-                )
-                full_log += f"--- Pass 3 ---\n{r3.stdout}\n{r3.stderr}\n"
+@app.route('/compile-zip', methods=['POST'])
+@require_auth
+def compile_zip():
+    """Compilar projeto enviado como ZIP."""
+    if 'project' not in request.files:
+        return jsonify({'error': 'Nenhum arquivo ZIP recebido.'}), 400
+    
+    zip_file = request.files['project']
+    engine = request.form.get('engine', DEFAULT_ENGINE)
+    project_id = request.form.get('projectId')
+    
+    if project_id:
+        work_dir = get_project_cache_dir(project_id)
+        os.makedirs(work_dir, exist_ok=True)
+    else:
+        work_dir = tempfile.mkdtemp(dir='/tmp' if IS_CLOUD else None, prefix='olc_zip_')
+    
+    try:
+        with zipfile.ZipFile(zip_file, 'r') as z:
+            z.extractall(work_dir)
+    except zipfile.BadZipFile:
+        return jsonify({'error': 'Arquivo ZIP inválido.'}), 400
+    
+    main_file = find_main_file(work_dir)
+    if not main_file:
+        return jsonify({'error': 'Nenhum arquivo .tex encontrado no ZIP.'}), 400
+    
+    result = compile_project(work_dir, main_file, engine, project_id)
+    
+    if result['success']:
+        with open(result['pdf_path'], 'rb') as f:
+            pdf_data = io.BytesIO(f.read())
+        
+        response = send_file(
+            pdf_data,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name='output.pdf'
+        )
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+    else:
+        return jsonify({
+            'error': 'Compilação falhou.',
+            'log': result['log'][-5000:]
+        }), 500
 
-            # 5. Return Result
-            pdf_filename = Path(main_file).stem + '.pdf'
-            pdf_path = work_dir / pdf_filename
-
-            if pdf_path.exists():
-                return send_file(
-                    io.BytesIO(pdf_path.read_bytes()),
-                    mimetype='application/pdf',
-                    as_attachment=True,
-                    download_name='output.pdf'
-                )
-            else:
-                return jsonify({'error': 'Compilation failed (No PDF generated)', 'logs': full_log}), 400
-
-    except Exception as e:
-        logger.error(f"Server Error: {e}")
-        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
-
-# ==================================================================================
-#  ROTAS LEGADAS (v2 sem auth ou para backward compatibility)
-# ==================================================================================
+# ═══════════════════════════════════════════════════════════════════
+#  Main
+# ═══════════════════════════════════════════════════════════════════
 
 if __name__ == '__main__':
-    import os
-    port = int(os.environ.get('PORT', 8765))
-    print(f"[STARTED] Servidor Python Iniciado na porta {port}")
-    if FIREBASE_INITIALIZED:
-        print("[SECURE] Modo SaaS Híbrido: ATIVO (Firebase Conectado)")
-    else:
-        print("[WARNING] Modo SaaS Híbrido: INATIVO (Falta serviceAccountKey.json)")
-    app.run(host='0.0.0.0', port=port)
+    engines = detect_available_engines()
+    
+    print('╔════════════════════════════════════════════════════════════╗')
+    print('║     Overleaf Hybrid Compiler v2.1                        ║')
+    print('╠════════════════════════════════════════════════════════════╣')
+    print(f'  Ambiente:  {"☁️ CLOUD" if IS_CLOUD else "🖥️ LOCAL"}')
+    print(f'  Port:      {PORT}')
+    print(f'  Engine:    {DEFAULT_ENGINE}')
+    print(f'  Motores:   {", ".join(engines) if engines else "NENHUM!"}')
+    print(f'  Timeout:   {COMPILE_TIMEOUT}s')
+    print(f'  Max Size:  {MAX_REQUEST_SIZE}MB')
+    print(f'  Auth:      {"Ativo" if AUTH_TOKEN else "Desativado"}')
+    print(f'  Cache:     {CACHE_DIR}')
+    print('╚════════════════════════════════════════════════════════════╝')
+    
+    if not engines:
+        print('⚠️  AVISO: Nenhum motor LaTeX encontrado!')
+        if IS_CLOUD:
+            print('   Verifique se o Dockerfile está correto.')
+        else:
+            print('   Instale MiKTeX (Windows) ou TeX Live (Linux/Mac).')
+    
+    app.run(host=HOST, port=PORT, debug=False)

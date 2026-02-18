@@ -1,0 +1,48 @@
+{
+    "manifest_version": 3,
+    "name": "Overleaf Hybrid Compiler",
+    "version": "2.1.0",
+    "description": "Compila PDFs do Overleaf localmente ou na nuvem (grátis)",
+    "permissions": [
+        "activeTab",
+        "storage",
+        "downloads",
+        "notifications"
+    ],
+    "host_permissions": [
+        "https://www.overleaf.com/*",
+        "https://overleaf.com/*",
+        "http://localhost:*/*",
+        "https://*.up.railway.app/*",
+        "https://*.onrender.com/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.overleaf.com/project/*",
+                "https://overleaf.com/project/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_idle",
+            "all_frames": false
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        }
+    },
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    }
+}

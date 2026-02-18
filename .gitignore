@@ -1,23 +1,23 @@
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.env
+.venv
 env/
 venv/
-.env
-
-# MacOS
-.DS_Store
-
-# Logs
-*.log
-npm-debug.log*
-
-# Node
+EXTENSAO_TCC/
 node_modules/
-
-# Server specifics
+.DS_Store
+.idea/
+.vscode/
+*.log
+serviceAccountKey.json
 server/serviceAccountKey.json
-server/projects_cache/
-server/temp_pdfs/
-server/firebase_secret.encoded
+server/cache/
+*.pdf
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz

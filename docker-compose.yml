@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  latex-server:
+    build: ./server
+    ports:
+      - "8765:8080"
+    environment:
+      - PORT=8080
+      - LATEX_ENGINE=pdflatex
+      - COMPILE_TIMEOUT=300
+      - MAX_REQUEST_SIZE=50
+      - DEBUG=true
+    volumes:
+      - ./server/cache:/app/cache # Persiste cache entre reinícios
+    restart: unless-stopped

@@ -1,6 +1,0 @@
-@echo off
-echo Installing dependencies...
-call npm install
-echo Starting local server...
-node server.js
-pause

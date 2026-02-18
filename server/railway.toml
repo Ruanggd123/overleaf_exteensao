@@ -1,0 +1,16 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python3 latex_server.py"
+healthcheckPath = "/status"
+healthcheckPort = 8080
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[deploy.env]
+PORT = "8080"
+LATEX_ENGINE = "pdflatex"
+COMPILE_TIMEOUT = "120"
+MAX_REQUEST_SIZE = "30"

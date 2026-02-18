@@ -1,9 +1,0 @@
-========================================================
-     COMO INSTALAR A EXTENSAO OVERLEAF PRO
-========================================================
-
-1. Se voce recebeu este arquivo ZIPado, extraia tudo primeiro.
-2. De dois cliques no arquivo "instalar_extensao.bat".
-3. Siga as instrucoes na tela preta.
-
-========================================================

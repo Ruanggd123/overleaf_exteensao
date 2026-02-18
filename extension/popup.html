@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            width: 380px; 
+            font-family: system-ui, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .header-icon { 
+            width: 40px; height: 40px; 
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            border-radius: 10px;
+            display: grid; place-items: center;
+            font-size: 20px;
+        }
+        h1 { font-size: 16px; }
+        .subtitle { font-size: 12px; color: #94a3b8; }
+        
+        .status-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .status-dot.online { background: #22c55e; }
+        .status-dot.offline { background: #ef4444; }
+        .status-dot.checking { background: #f59e0b; animation: pulse 1s infinite; }
+        
+        .section { margin-bottom: 16px; }
+        label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 6px; text-transform: uppercase; }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-size: 13px;
+            margin-bottom: 10px;
+        }
+        
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: #1e293b;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .toggle-switch {
+            width: 44px; height: 24px;
+            background: #334155;
+            border-radius: 12px;
+            position: relative;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .toggle-switch.active { background: #22c55e; }
+        .toggle-switch::after {
+            content: ''; position: absolute;
+            width: 20px; height: 20px;
+            background: white;
+            border-radius: 50%;
+            top: 2px; left: 2px;
+            transition: 0.3s;
+        }
+        .toggle-switch.active::after { left: 22px; }
+        
+        button.save {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        .info-box {
+            background: #1e293b;
+            border-left: 3px solid #3b82f6;
+            padding: 12px;
+            border-radius: 0 8px 8px 0;
+            font-size: 12px;
+            line-height: 1.5;
+            margin-top: 16px;
+        }
+        .info-box a { color: #60a5fa; }
+        
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-icon">🚀</div>
+        <div>
+            <h1>Hybrid Compiler</h1>
+            <div class="subtitle">v2.1.0 • Local + Cloud</div>
+        </div>
+    </div>
+
+    <div class="status-card">
+        <div class="status-row">
+            <span class="status-dot checking" id="local-dot"></span>
+            <span id="local-status">Verificando local...</span>
+        </div>
+        <div class="status-row">
+            <span class="status-dot checking" id="cloud-dot"></span>
+            <span id="cloud-status">Verificando cloud...</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <label>Servidor Local</label>
+        <input type="text" id="local-url" value="http://localhost:8765">
+        
+        <label>Servidor Cloud (Railway/Render)</label>
+        <input type="text" id="cloud-url" placeholder="https://seu-app.up.railway.app">
+        
+        <label>Token de Acesso (Cloud)</label>
+        <input type="password" id="auth-token" placeholder="Cole o token do Railway/Render">
+        
+        <label>Motor LaTeX</label>
+        <select id="engine">
+            <option value="pdflatex">pdflatex</option>
+            <option value="xelatex">xelatex</option>
+            <option value="lualatex">lualatex</option>
+        </select>
+    </div>
+
+    <div class="toggle-row">
+        <span>☁️ Usar Cloud por padrão</span>
+        <div class="toggle-switch" id="toggle-cloud"></div>
+    </div>
+    
+    <div class="toggle-row">
+        <span>🔄 Fallback automático</span>
+        <div class="toggle-switch active" id="toggle-fallback"></div>
+    </div>
+
+    <button class="save" id="btn-save">💾 Salvar Configurações</button>
+
+    <div class="info-box">
+        <strong>☁️ Hospedagem Gratuita:</strong><br>
+        • <a href="https://railway.app" target="_blank">Railway</a>: $5/mês grátis<br>
+        • <a href="https://render.com" target="_blank">Render</a>: 750h/mês grátis<br>
+        Deploy automático via GitHub.
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
