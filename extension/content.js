@@ -756,23 +756,46 @@ class OverleafHybridCompiler {
 
         } catch (err) {
             console.error('[OLC] Compile error:', err);
-            this._toast(`Erro: ${err.message}`, 'error');
 
-            // Recover from cache miss by forcing full compile
-            if (err.message && (err.message.includes('CACHE_MISS') || err.message.includes('Cache não encontrado'))) {
-                console.warn('[OLC] Cache miss detected during catch. Establishing full sync...');
-                this.synchronizer.reset();
+            // SPECIAL RETRY LOGIC:
+            // If delta compilation failed (generic error or explicit), try full compile once.
+            // This fixes "Server has directory but it's empty/corrupt" or "Sync mismatch".
+            if (action === 'COMPILE_LATEX_DELTA' && !this._isRetrying) {
+                console.warn('[OLC] Delta failed. Retrying with Full Compile...', err);
+                this._toast('Sincronização falhou. Tentando compilação completa...', 'info');
+
+                this._isRetrying = true;
+                this.synchronizer.reset(); // Clear local hashes to force full sync next time too
+
                 try {
-                    const data = await this.extractor.extractViaZIP(); // Re-extract freshly
-                    const fullResult = await this._compileFull(data);
+                    const fullData = await this.extractor.extractViaZIP();
+                    const result = await this._compileFull(fullData);
 
-                    const pdfBlob = new Blob([new Uint8Array(fullResult.pdfData)], { type: 'application/pdf' });
+                    // Success handling for retry
+                    const pdfBlob = new Blob([new Uint8Array(result.pdfData)], { type: 'application/pdf' });
                     this._displayPdf(pdfBlob);
-                    this._toast(`Recuperado com sucesso!`, 'success');
+
+                    const modeIcon = result.mode === 'cloud' ? '☁' : '🖥';
+                    this._toast(`${modeIcon} Recuperado com sucesso!`, 'success');
+                    this._safeCheckServers();
+                    return; // Exit function
                 } catch (retryErr) {
+                    console.error('[OLC] Retry failed:', retryErr);
                     this._toast(`Erro fatal: ${retryErr.message}`, 'error');
+                } finally {
+                    this._isRetrying = false;
                 }
-            } else if (err.message && (err.message.includes('Cache') || err.message.includes('ZIP'))) {
+            } else {
+                // Determine user-friendly error message
+                let msg = err.message;
+                if (msg === 'CACHE_MISS') msg = 'Projeto não encontrado no servidor.';
+                if (msg === 'DELTA_NOT_SUPPORTED') msg = 'Servidor antigo (sem suporte a delta).';
+
+                this._toast(`Erro: ${msg}`, 'error');
+            }
+
+            // Still reset synchronizer on critical errors to avoid getting stuck
+            if (err.message && (err.message.includes('CACHE_MISS') || err.message.includes('ZIP'))) {
                 this.synchronizer.reset();
             }
         } finally {
