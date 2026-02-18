@@ -1,18 +1,17 @@
 {
     "manifest_version": 3,
     "name": "Overleaf Hybrid Compiler",
-    "version": "2.1.0",
-    "description": "Compila PDFs do Overleaf localmente ou na nuvem (grátis)",
+    "version": "2.2.0",
+    "description": "Compila projetos Overleaf usando servidor local ou cloud (fallback automático).",
     "permissions": [
         "activeTab",
         "storage",
-        "downloads",
-        "notifications"
+        "downloads"
     ],
     "host_permissions": [
         "https://www.overleaf.com/*",
         "https://overleaf.com/*",
-        "http://localhost:*/*",
+        "http://localhost:8765/*",
         "https://*.up.railway.app/*",
         "https://*.onrender.com/*"
     ],
@@ -26,10 +25,16 @@
                 "https://overleaf.com/project/*"
             ],
             "js": [
+                "jszip.min.js",
+                "utils.js",
+                "extractor.js",
+                "synchronizer.js",
                 "content.js"
             ],
-            "run_at": "document_idle",
-            "all_frames": false
+            "css": [
+                "styles.css"
+            ],
+            "run_at": "document_start"
         }
     ],
     "action": {

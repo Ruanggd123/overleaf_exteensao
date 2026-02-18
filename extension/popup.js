@@ -1,86 +1,75 @@
+// popup.js
 document.addEventListener('DOMContentLoaded', () => {
-    // Elementos
-    const localDot = document.getElementById('local-dot');
-    const localText = document.getElementById('local-status');
-    const cloudDot = document.getElementById('cloud-dot');
-    const cloudText = document.getElementById('cloud-status');
-    const inputs = {
+    // Elements
+    const els = {
+        extensionToggle: document.getElementById('extension-toggle'),
         localUrl: document.getElementById('local-url'),
         cloudUrl: document.getElementById('cloud-url'),
         authToken: document.getElementById('auth-token'),
-        engine: document.getElementById('engine')
+        autoFallback: document.getElementById('auto-fallback'),
+        btnSave: document.getElementById('btn-save'),
+        localDot: document.getElementById('local-dot'),
+        localStatus: document.getElementById('local-status'),
+        cloudDot: document.getElementById('cloud-dot'),
+        cloudStatus: document.getElementById('cloud-status'),
+        toast: document.getElementById('toast')
     };
-    const toggles = {
-        cloud: document.getElementById('toggle-cloud'),
-        fallback: document.getElementById('toggle-fallback')
-    };
 
-    // Carrega configurações
-    chrome.runtime.sendMessage({ action: 'GET_SETTINGS' }, (s) => {
-        if (chrome.runtime.lastError) return;
+    // Load Settings
+    chrome.storage.local.get(['showExtension', 'localUrl', 'cloudUrl', 'authToken', 'autoFallback'], (data) => {
+        els.extensionToggle.checked = data.showExtension !== false; // Default true
+        els.localUrl.value = data.localUrl || 'http://localhost:8765';
+        els.cloudUrl.value = data.cloudUrl || '';
+        els.authToken.value = data.authToken || '';
+        els.autoFallback.checked = data.autoFallback !== false; // Default true
 
-        inputs.localUrl.value = s.localUrl || 'http://localhost:8765';
-        inputs.cloudUrl.value = s.cloudUrl || '';
-        inputs.authToken.value = s.authToken || '';
-        inputs.engine.value = s.engine || 'pdflatex';
-
-        toggles.cloud.classList.toggle('active', s.useCloud);
-        toggles.fallback.classList.toggle('active', s.autoFallback !== false);
+        checkStatus();
     });
 
-    // Verifica status
-    function checkStatus() {
-        chrome.runtime.sendMessage({ action: 'CHECK_SERVERS' }, (res) => {
-            if (!res) return;
+    // Save
+    els.btnSave.addEventListener('click', () => {
+        saveSettings();
+    });
 
-            // Local
-            if (res.local?.online) {
-                localDot.className = 'status-dot online';
-                localText.textContent = '🖥️ Local online';
-            } else {
-                localDot.className = 'status-dot offline';
-                localText.textContent = '❌ Local offline';
-            }
+    els.extensionToggle.addEventListener('change', () => {
+        saveSettings(); // Save immediately on toggle
+    });
 
-            // Cloud
-            if (res.cloud?.online) {
-                cloudDot.className = 'status-dot online';
-                cloudText.textContent = `☁️ Cloud online (${res.cloud.engines?.[0] || '?'})`;
-            } else {
-                cloudDot.className = res.cloudUrl ? 'status-dot offline' : 'status-dot checking';
-                cloudText.textContent = res.cloudUrl ? '❌ Cloud offline' : '☁️ Cloud não configurado';
-            }
+    function saveSettings() {
+        chrome.storage.local.set({
+            showExtension: els.extensionToggle.checked,
+            localUrl: els.localUrl.value.trim(),
+            cloudUrl: els.cloudUrl.value.trim(),
+            authToken: els.authToken.value.trim(),
+            autoFallback: els.autoFallback.checked
+        }, () => {
+            showToast('Salvo com sucesso!');
+            checkStatus();
         });
     }
 
-    checkStatus();
+    // Check Status via Background
+    function checkStatus() {
+        chrome.runtime.sendMessage({ action: 'CHECK_SERVERS' }, (res) => {
+            if (chrome.runtime.lastError || !res) return;
 
-    // Toggles
-    Object.entries(toggles).forEach(([key, el]) => {
-        el.addEventListener('click', () => el.classList.toggle('active'));
-    });
-
-    // Salvar
-    document.getElementById('btn-save').addEventListener('click', () => {
-        const settings = {
-            serverUrl: inputs.localUrl.value.trim(),
-            cloudUrl: inputs.cloudUrl.value.trim(),
-            authToken: inputs.authToken.value.trim(),
-            latexEngine: inputs.engine.value,
-            useCloud: toggles.cloud.classList.contains('active'),
-            autoFallback: toggles.fallback.classList.contains('active')
-        };
-
-        chrome.runtime.sendMessage({ action: 'SAVE_SETTINGS', settings }, () => {
-            const btn = document.getElementById('btn-save');
-            const original = btn.textContent;
-            btn.textContent = '✅ Salvo!';
-            btn.style.background = '#16a34a';
-            setTimeout(() => {
-                btn.textContent = original;
-                btn.style.background = '';
-                checkStatus();
-            }, 1500);
+            updateStatus(els.localDot, els.localStatus, res.local);
+            updateStatus(els.cloudDot, els.cloudStatus, res.cloud);
         });
-    });
+    }
+
+    function updateStatus(dot, text, online) {
+        if (online) {
+            dot.className = 'status-dot local'; // Reusing 'local' class for green color
+            text.textContent = 'Online';
+        } else {
+            dot.className = 'status-dot offline';
+            text.textContent = 'Offline';
+        }
+    }
+
+    function showToast(msg) {
+        els.toast.textContent = msg;
+        setTimeout(() => els.toast.textContent = '', 2000);
+    }
 });

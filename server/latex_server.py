@@ -21,6 +21,7 @@ from datetime import datetime
 
 from flask import Flask, request, send_file, jsonify, render_template_string
 from flask_cors import CORS
+from pdf2docx import Converter
 
 # ═══════════════════════════════════════════════════════════════════
 #  Configuration (Auto-detecta ambiente)
@@ -442,9 +443,144 @@ def compile_zip():
             'log': result['log'][-5000:]
         }), 500
 
+@app.route('/compile-delta', methods=['POST'])
+@require_auth
+def compile_delta():
+    """Compilar usando atualização incremental (delta)."""
+    project_id = request.form.get('projectId')
+    engine = request.form.get('engine', DEFAULT_ENGINE)
+    
+    if not project_id:
+        return jsonify({'error': 'Project ID obrigatório para compilação incremental.'}), 400
+
+    work_dir = get_project_cache_dir(project_id)
+    
+    # Se o diretório não existe, o cache foi limpo ou nunca existiu.
+    # Retorna 410 Gone para o cliente saber que deve enviar o ZIP completo.
+    if not os.path.isdir(work_dir):
+        return jsonify({'error': 'CACHE_MISS', 'message': 'Cache não encontrado. Envie ZIP completo.'}), 410
+
+    try:
+        # 1. Processar Deletes
+        deleted_files_json = request.form.get('deleted_files')
+        if deleted_files_json:
+            try:
+                deleted_files = json.loads(deleted_files_json)
+                for filename in deleted_files:
+                    # Garantir segurança do path
+                    safe_filename = os.path.normpath(filename)
+                    if safe_filename.startswith('..') or os.path.isabs(safe_filename):
+                        continue
+                        
+                    file_path = os.path.join(work_dir, safe_filename)
+                    if os.path.exists(file_path):
+                        if os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                        else:
+                            os.remove(file_path)
+                        print(f'[Delta] Deleted: {filename}')
+            except json.JSONDecodeError:
+                print('[Delta] Erro ao decodificar deleted_files')
+
+        # 2. Processar Updates (Delta ZIP)
+        if 'delta_zip' in request.files:
+            delta_zip = request.files['delta_zip']
+            # Se o ZIP não estiver vazio (tamanho > 0 ou valid zip header)
+            # JSZip vazio tem ~22 bytes. 
+            delta_zip.seek(0, os.SEEK_END)
+            size = delta_zip.tell()
+            delta_zip.seek(0)
+            
+            if size > 22: # header vazio zip
+                try:
+                    with zipfile.ZipFile(delta_zip, 'r') as z:
+                        z.extractall(work_dir)
+                        print(f'[Delta] Extracted {len(z.namelist())} updated files.')
+                except zipfile.BadZipFile:
+                    return jsonify({'error': 'Arquivo Delta ZIP inválido.'}), 400
+        
+        # 3. Compilar
+        main_file = find_main_file(work_dir)
+        if not main_file:
+            return jsonify({'error': 'Nenhum arquivo .tex encontrado no projeto.'}), 400
+        
+        result = compile_project(work_dir, main_file, engine, project_id)
+        
+        if result['success']:
+            with open(result['pdf_path'], 'rb') as f:
+                pdf_data = io.BytesIO(f.read())
+            
+            response = send_file(
+                pdf_data,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name='output.pdf'
+            )
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+        else:
+            return jsonify({
+                'error': 'Compilação falhou.',
+                'log': result['log'][-5000:]
+            }), 500
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': f'Erro processando delta: {str(e)}'}), 500
+
 # ═══════════════════════════════════════════════════════════════════
 #  Main
 # ═══════════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Additional Features: PDF to Word
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route('/convert/word', methods=['POST'])
+def convert_to_word():
+    """
+    Converte PDF para Word.
+    Recebe um arquivo PDF via form-data 'pdf'.
+    Retorna o arquivo .docx convertido.
+    """
+    if 'pdf' not in request.files:
+        return jsonify({'error': 'Arquivo PDF não enviado.'}), 400
+        
+    pdf_file = request.files['pdf']
+    if pdf_file.filename == '':
+        return jsonify({'error': 'Nome de arquivo vazio.'}), 400
+
+    # Criar diretório temporário para a conversão
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_path = os.path.join(temp_dir, 'input.pdf')
+        output_path = os.path.join(temp_dir, 'documento.docx')
+        
+        try:
+            # Salvar PDF
+            pdf_file.save(input_path)
+            
+            # Converter
+            cv = Converter(input_path)
+            cv.convert(output_path)
+            cv.close()
+            
+            # Streaming do arquivo de volta
+            return_data = io.BytesIO()
+            with open(output_path, 'rb') as f:
+                return_data.write(f.read())
+            return_data.seek(0)
+            
+            return send_file(
+                return_data,
+                as_attachment=True,
+                download_name='documento.docx',
+                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            )
+            
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({'error': f'Erro na conversão: {str(e)}'}), 500
 
 if __name__ == '__main__':
     engines = detect_available_engines()

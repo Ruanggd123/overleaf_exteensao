@@ -1,162 +1,250 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            width: 380px; 
-            font-family: system-ui, sans-serif;
-            background: #0f172a;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 340px;
+            min-height: 260px;
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(145deg, #0f172a 0%, #1e293b 100%);
             color: #e2e8f0;
             padding: 20px;
         }
-        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-        .header-icon { 
-            width: 40px; height: 40px; 
-            background: linear-gradient(135deg, #22c55e, #16a34a);
-            border-radius: 10px;
-            display: grid; place-items: center;
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .header-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
             font-size: 20px;
         }
-        h1 { font-size: 16px; }
-        .subtitle { font-size: 12px; color: #94a3b8; }
-        
+
+        .header-title {
+            font-size: 16px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #10b981, #6ee7b7);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+        }
+
         .status-card {
-            background: #1e293b;
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
             padding: 16px;
             margin-bottom: 16px;
         }
-        .status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
-        .status-dot.online { background: #22c55e; }
-        .status-dot.offline { background: #ef4444; }
-        .status-dot.checking { background: #f59e0b; animation: pulse 1s infinite; }
-        
-        .section { margin-bottom: 16px; }
-        label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 6px; text-transform: uppercase; }
-        input, select {
+
+        .status-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+
+        .status-dot.local {
+            background: #10b981;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+        }
+
+        .status-dot.cloud {
+            background: #3b82f6;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+        }
+
+        .status-dot.offline {
+            background: #ef4444;
+        }
+
+        .status-dot.checking {
+            background: #f59e0b;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        .settings label {
+            display: block;
+            font-size: 11px;
+            color: #94a3b8;
+            margin-bottom: 6px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .settings input,
+        .settings select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #e2e8f0;
+            margin-bottom: 10px;
+            outline: none;
+        }
+
+        .settings input:focus {
+            border-color: #10b981;
+        }
+
+        .btn-save {
             width: 100%;
             padding: 10px;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            background: #0f172a;
-            color: #e2e8f0;
-            font-size: 13px;
-            margin-bottom: 10px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #fff;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
         }
-        
+
         .toggle-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px;
-            background: #1e293b;
-            border-radius: 8px;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
-        .toggle-switch {
-            width: 44px; height: 24px;
-            background: #334155;
-            border-radius: 12px;
+
+        .switch {
             position: relative;
-            cursor: pointer;
-            transition: 0.3s;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
         }
-        .toggle-switch.active { background: #22c55e; }
-        .toggle-switch::after {
-            content: ''; position: absolute;
-            width: 20px; height: 20px;
-            background: white;
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #475569;
+            border-radius: 34px;
+            transition: .4s;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
             border-radius: 50%;
-            top: 2px; left: 2px;
-            transition: 0.3s;
+            transition: .4s;
         }
-        .toggle-switch.active::after { left: 22px; }
-        
-        button.save {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #22c55e, #16a34a);
-            border: none;
-            border-radius: 8px;
-            color: white;
-            font-weight: 600;
-            cursor: pointer;
+
+        input:checked+.slider {
+            background-color: #10b981;
         }
-        
-        .info-box {
-            background: #1e293b;
-            border-left: 3px solid #3b82f6;
-            padding: 12px;
-            border-radius: 0 8px 8px 0;
+
+        input:checked+.slider:before {
+            transform: translateX(20px);
+        }
+
+        #toast {
+            margin-top: 10px;
+            text-align: center;
             font-size: 12px;
-            line-height: 1.5;
-            margin-top: 16px;
+            color: #6ee7b7;
+            height: 16px;
         }
-        .info-box a { color: #60a5fa; }
-        
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     </style>
 </head>
+
 <body>
     <div class="header">
-        <div class="header-icon">🚀</div>
+        <div class="header-icon">⚡</div>
         <div>
-            <h1>Hybrid Compiler</h1>
-            <div class="subtitle">v2.1.0 • Local + Cloud</div>
+            <div class="header-title">Overleaf Hybrid</div>
+            <div style="font-size:11px; color:#64748b;">Local + Cloud</div>
         </div>
     </div>
 
     <div class="status-card">
         <div class="status-row">
             <span class="status-dot checking" id="local-dot"></span>
-            <span id="local-status">Verificando local...</span>
+            <span style="font-size:13px">Local: <span id="local-status">Verificando...</span></span>
         </div>
         <div class="status-row">
             <span class="status-dot checking" id="cloud-dot"></span>
-            <span id="cloud-status">Verificando cloud...</span>
+            <span style="font-size:13px">Cloud: <span id="cloud-status">Verificando...</span></span>
         </div>
     </div>
 
-    <div class="section">
-        <label>Servidor Local</label>
-        <input type="text" id="local-url" value="http://localhost:8765">
-        
-        <label>Servidor Cloud (Railway/Render)</label>
-        <input type="text" id="cloud-url" placeholder="https://seu-app.up.railway.app">
-        
-        <label>Token de Acesso (Cloud)</label>
-        <input type="password" id="auth-token" placeholder="Cole o token do Railway/Render">
-        
-        <label>Motor LaTeX</label>
-        <select id="engine">
-            <option value="pdflatex">pdflatex</option>
-            <option value="xelatex">xelatex</option>
-            <option value="lualatex">lualatex</option>
-        </select>
-    </div>
+    <div class="settings">
+        <div class="toggle-row"
+            style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+            <label style="margin:0; font-size:13px; color:#fff;">Ativar Extensão</label>
+            <label class="switch">
+                <input type="checkbox" id="extension-toggle" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
 
-    <div class="toggle-row">
-        <span>☁️ Usar Cloud por padrão</span>
-        <div class="toggle-switch" id="toggle-cloud"></div>
-    </div>
-    
-    <div class="toggle-row">
-        <span>🔄 Fallback automático</span>
-        <div class="toggle-switch active" id="toggle-fallback"></div>
-    </div>
+        <label>URL Local</label>
+        <input type="text" id="local-url" placeholder="http://localhost:8765">
 
-    <button class="save" id="btn-save">💾 Salvar Configurações</button>
+        <label>URL Cloud (Opcional)</label>
+        <input type="text" id="cloud-url" placeholder="https://seu-app.railway.app">
 
-    <div class="info-box">
-        <strong>☁️ Hospedagem Gratuita:</strong><br>
-        • <a href="https://railway.app" target="_blank">Railway</a>: $5/mês grátis<br>
-        • <a href="https://render.com" target="_blank">Render</a>: 750h/mês grátis<br>
-        Deploy automático via GitHub.
+        <label>Token (Cloud)</label>
+        <input type="password" id="auth-token" placeholder="Se necessário">
+
+        <div class="toggle-row">
+            <label style="margin:0">Fallback Auto</label>
+            <label class="switch">
+                <input type="checkbox" id="auto-fallback">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <button class="btn-save" id="btn-save">Salvar Configurações</button>
+        <div id="toast"></div>
     </div>
-
     <script src="popup.js"></script>
 </body>
+
 </html>
