@@ -16,6 +16,7 @@ class OverleafHybridCompiler {
         this.autoCompileEnabled = false;
         this.observer = null;
         this.contextInvalidated = false;
+        this._isRetrying = false; // Initialize retry flag
 
         this._init();
     }
@@ -332,31 +333,58 @@ class OverleafHybridCompiler {
         }
     }
 
+    // CORREÇÃO: Renomeado _showToast para _toast para consistência
+    _toast(msg, type = 'info') {
+        const t = document.createElement('div');
+        t.className = 'olc-toast';
+        t.textContent = msg;
+        t.style.background = type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#3b82f6';
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+    }
 
+    // CORREÇÃO: Método _showToast removido, usar _toast diretamente
+    // Se houver referências antigas, redirecionar para _toast
+    _showToast(msg, type = 'info') {
+        return this._toast(msg, type);
+    }
 
     async _convertToWord() {
         if (!this.lastPdfBlob) {
-            this._showToast('Nenhum PDF compilado disponível.', 'error');
+            this._toast('Nenhum PDF compilado disponível.', 'error');
             return;
         }
 
-        this._showToast('Convertendo para Word...', 'info');
+        this._toast('Convertendo para Word...', 'info');
 
         try {
             const formData = new FormData();
             formData.append('pdf', this.lastPdfBlob, 'documento.pdf');
 
-            // Get URL dynamically if possible, or use default
-            // Assuming we can get it from storage or hardcoded for now
-            const stored = await chrome.storage.local.get(['serverUrl']);
-            const serverUrl = stored.serverUrl || 'http://localhost:8765';
+            // Get best available server URL
+            let serverUrl = CONFIG.serverUrl;
+            try {
+                const settings = await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({ action: 'GET_SETTINGS' }, (s) => {
+                        resolve(s || {});
+                    });
+                });
+                serverUrl = settings.localUrl || settings.cloudUrl || CONFIG.serverUrl;
+            } catch (e) {
+                console.warn('[OLC] Could not get settings for Word conversion:', e);
+            }
 
             const response = await fetch(`${serverUrl}/convert/word`, {
                 method: 'POST',
                 body: formData
             });
 
-            if (!response.ok) throw new Error('Falha na conversão');
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error('Servidor não possui conversão para Word. Endpoint /convert/word não encontrado.');
+                }
+                throw new Error(`Falha na conversão: ${response.status}`);
+            }
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
@@ -368,10 +396,10 @@ class OverleafHybridCompiler {
             a.remove();
             URL.revokeObjectURL(url);
 
-            this._showToast('Conversão concluída!', 'success');
+            this._toast('Conversão concluída!', 'success');
         } catch (err) {
-            console.error(err);
-            this._showToast('Erro ao converter para Word.', 'error');
+            console.error('[OLC] Word conversion error:', err);
+            this._toast(`Erro ao converter: ${err.message}`, 'error');
         }
     }
 
@@ -693,15 +721,17 @@ class OverleafHybridCompiler {
         this._updateUICompiling(true);
         this._showCompilingOverlay();
 
+        // CORREÇÃO: Definir action no escopo superior para uso no catch
+        let action = 'COMPILE_LATEX';
+        let payloadData = null;
+        let data = null;
+
         try {
             // 1. Extract Full ZIP (Always do this as baseline for now)
-            const data = await this.extractor.extractViaZIP();
+            data = await this.extractor.extractViaZIP();
 
             // 2. Incremental Check
             const delta = await this.synchronizer.createDeltaUpdate(data.blob);
-
-            let action = 'COMPILE_LATEX';
-            let payloadData = null;
 
             if (delta.hasChanges) {
                 console.log(`[OLC] Delta Update: ${delta.deletedFiles.length} deleted, sending delta ZIP.`);
@@ -768,8 +798,11 @@ class OverleafHybridCompiler {
                 this.synchronizer.reset(); // Clear local hashes to force full sync next time too
 
                 try {
-                    const fullData = await this.extractor.extractViaZIP();
-                    const result = await this._compileFull(fullData);
+                    // Re-extract if needed
+                    if (!data) {
+                        data = await this.extractor.extractViaZIP();
+                    }
+                    const result = await this._compileFull(data);
 
                     // Success handling for retry
                     const pdfBlob = new Blob([new Uint8Array(result.pdfData)], { type: 'application/pdf' });
@@ -788,14 +821,16 @@ class OverleafHybridCompiler {
             } else {
                 // Determine user-friendly error message
                 let msg = err.message;
-                if (msg === 'CACHE_MISS') msg = 'Projeto não encontrado no servidor.';
+                if (msg === 'CACHE_MISS') msg = 'Projeto não encontrado no servidor. Faça uma compilação completa.';
                 if (msg === 'DELTA_NOT_SUPPORTED') msg = 'Servidor antigo (sem suporte a delta).';
+                if (msg.includes('404')) msg = 'Endpoint não encontrado no servidor.';
+                if (msg.includes('Nenhum servidor')) msg = 'Servidor offline. Verifique se está rodando.';
 
                 this._toast(`Erro: ${msg}`, 'error');
             }
 
             // Still reset synchronizer on critical errors to avoid getting stuck
-            if (err.message && (err.message.includes('CACHE_MISS') || err.message.includes('ZIP'))) {
+            if (err.message && (err.message.includes('CACHE_MISS') || err.message.includes('ZIP') || err.message.includes('404'))) {
                 this.synchronizer.reset();
             }
         } finally {
@@ -1033,15 +1068,6 @@ class OverleafHybridCompiler {
         a.href = this.lastPdfUrl;
         a.download = `overleaf-${Date.now()}.pdf`;
         a.click();
-    }
-
-    _toast(msg, type = 'info') {
-        const t = document.createElement('div');
-        t.className = 'olc-toast';
-        t.textContent = msg;
-        t.style.background = type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#3b82f6';
-        document.body.appendChild(t);
-        setTimeout(() => t.remove(), 3000);
     }
 
     _updateVisibility(visible) {

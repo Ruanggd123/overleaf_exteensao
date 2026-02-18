@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 """
-Overleaf Hybrid Compiler - Servidor LaTeX
-Roda em: Railway/Render (cloud) ou Localhost (desenvolvimento)
-Free tier: Railway ($5/mês grátis) ou Render (750h/mês grátis)
+Servidor LaTeX para Cloud (Cloud Run/AWS ECS) com conversão para Word
+
+Endpoints:
+  POST /compile      — Compila arquivos .tex enviados como JSON
+  POST /compile-zip  — Compila projeto enviado como ZIP
+  POST /compile-delta — Compila apenas mudanças (delta)
+  POST /convert/word — Converte PDF para DOCX usando LibreOffice/pandoc
+  GET  /status       — Health check
+  GET  /             — Página de status/landing
+
+Deploy:
+  - Google Cloud Run: gcloud run deploy --source .
+  - AWS ECS: Use o Dockerfile com Fargate
 """
 
 import os
@@ -14,53 +24,80 @@ import zipfile
 import subprocess
 import traceback
 import json
-import hashlib
 from pathlib import Path
 from functools import wraps
-from datetime import datetime
 
 from flask import Flask, request, send_file, jsonify, render_template_string
 from flask_cors import CORS
-from pdf2docx import Converter
 
 # ═══════════════════════════════════════════════════════════════════
-#  Configuration (Auto-detecta ambiente)
+#  Configuration (Cloud-Optimized)
 # ═══════════════════════════════════════════════════════════════════
 
-IS_CLOUD = os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RENDER')
-PORT = int(os.environ.get('PORT', '8765'))
-HOST = '0.0.0.0'
-
-# LaTeX Configuration
 SUPPORTED_ENGINES = ['pdflatex', 'xelatex', 'lualatex']
 DEFAULT_ENGINE = os.environ.get('LATEX_ENGINE', 'pdflatex')
-BIBTEX_CMD = os.environ.get('BIBTEX_CMD', 'bibtex')
+BIBTEX_CMD = 'bibtex'
 COMPILE_TIMEOUT = int(os.environ.get('COMPILE_TIMEOUT', '300'))
-
-# Security
-AUTH_TOKEN = os.environ.get('AUTH_TOKEN')  # Obrigatório em produção cloud
+PORT = int(os.environ.get('PORT', '8080'))
+AUTH_TOKEN = os.environ.get('AUTH_TOKEN')  # Obrigatório em produção!
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', '50'))  # MB
 
-# Cache/Persistence
-if IS_CLOUD:
-    # Cloud: usa /tmp (ephemeral) ou volume persistente se configurado
-    CACHE_DIR = os.environ.get('PERSISTENT_STORAGE', '/tmp/latex-cache')
-else:
-    # Local: pasta persistente no projeto
-    CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
-
-os.makedirs(CACHE_DIR, exist_ok=True)
+# Cloud storage para cache (opcional)
+USE_CLOUD_STORAGE = os.environ.get('USE_CLOUD_STORAGE', 'false').lower() == 'true'
+if USE_CLOUD_STORAGE:
+    try:
+        from google.cloud import storage
+        GCS_BUCKET = os.environ.get('GCS_BUCKET')
+        storage_client = storage.Client()
+        print(f"[Cloud] Google Cloud Storage ativado: {GCS_BUCKET}")
+    except ImportError:
+        USE_CLOUD_STORAGE = False
+        print("[Cloud] google-cloud-storage não instalado, usando disco local")
 
 app = Flask(__name__)
 CORS(app, resources={
     r"/*": {
-        "origins": "*",  # Em produção, restrinja via AUTH_TOKEN
+        "origins": "*",  # Em produção, restrinja para seus domínios
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Authorization", "Content-Type"]
     }
 })
 
+# Limitar tamanho do upload
 app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE * 1024 * 1024
+
+# Cache para projetos (para compilação delta)
+project_cache = {}  # projectId -> {files, timestamp}
+
+# ═══════════════════════════════════════════════════════════════════
+#  Cloud Storage Helpers
+# ═══════════════════════════════════════════════════════════════════
+
+def upload_to_gcs(local_path, destination_blob_name):
+    """Upload arquivo para Google Cloud Storage."""
+    if not USE_CLOUD_STORAGE:
+        return None
+    try:
+        bucket = storage_client.bucket(GCS_BUCKET)
+        blob = bucket.blob(destination_blob_name)
+        blob.upload_from_filename(local_path)
+        return blob.public_url
+    except Exception as e:
+        print(f"[GCS] Erro no upload: {e}")
+        return None
+
+def download_from_gcs(source_blob_name, destination_path):
+    """Download arquivo do Google Cloud Storage."""
+    if not USE_CLOUD_STORAGE:
+        return False
+    try:
+        bucket = storage_client.bucket(GCS_BUCKET)
+        blob = bucket.blob(source_blob_name)
+        blob.download_to_filename(destination_path)
+        return True
+    except Exception as e:
+        print(f"[GCS] Erro no download: {e}")
+        return False
 
 # ═══════════════════════════════════════════════════════════════════
 #  Security & Error Handling
@@ -81,18 +118,26 @@ def handle_too_large(e):
     return jsonify({'error': f'Arquivo muito grande (limite: {MAX_REQUEST_SIZE}MB).'}), 413
 
 def require_auth(f):
-    """Decorator para exigir autenticação em cloud."""
+    """Decorator para exigir autenticação em produção."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if IS_CLOUD and AUTH_TOKEN:
+        if AUTH_TOKEN:
             auth = request.headers.get('Authorization')
             if not auth or auth != f'Bearer {AUTH_TOKEN}':
-                return jsonify({'error': 'Unauthorized - Token inválido'}), 401
+                return jsonify({'error': 'Unauthorized - Token inválido ou ausente'}), 401
         return f(*args, **kwargs)
     return decorated_function
 
+def check_origin():
+    """Verifica origem da requisição (proteção básica)."""
+    allowed_origins = os.environ.get('ALLOWED_ORIGINS', '').split(',')
+    origin = request.headers.get('Origin', '')
+    if allowed_origins and allowed_origins[0] and origin not in allowed_origins:
+        return jsonify({'error': 'Origin not allowed'}), 403
+    return None
+
 # ═══════════════════════════════════════════════════════════════════
-#  Utility Functions
+#  Utility Functions (Mesmas funções, otimizadas para cloud)
 # ═══════════════════════════════════════════════════════════════════
 
 def detect_available_engines():
@@ -132,17 +177,9 @@ def find_main_file(directory):
     # Fallback: primeiro .tex
     return str(tex_files[0].relative_to(directory))
 
-def get_project_cache_dir(project_id):
-    """Retorna diretório de cache para um projeto."""
-    if not project_id:
-        return None
-    # Hash para evitar path traversal
-    safe_id = hashlib.sha256(project_id.encode()).hexdigest()[:16]
-    return os.path.join(CACHE_DIR, safe_id)
-
 def compile_project(directory, main_file, engine=None, project_id=None):
     """
-    Pipeline de compilação LaTeX.
+    Pipeline de compilação LaTeX otimizado para cloud.
     """
     engine = engine if engine in SUPPORTED_ENGINES else DEFAULT_ENGINE
     
@@ -167,14 +204,14 @@ def compile_project(directory, main_file, engine=None, project_id=None):
     
     env = os.environ.copy()
     env['MIKTEX_ENABLEINSTALLER'] = 't'
-    env['TEXMFVAR'] = '/tmp/texmf-var'
+    env['TEXMFVAR'] = '/tmp/texmf-var'  # Evita problemas de permissão
     
     full_log = ''
-    print(f'[Compile] Engine: {engine}, Main: {main_file}, Project: {project_id}')
+    print(f'[Cloud Compile] Engine: {engine}, Main: {main_file}')
     
     try:
         # Passo 1
-        print('[Compile] Pass 1...')
+        print('[Cloud Compile] Pass 1...')
         r1 = subprocess.run(
             base_cmd, cwd=work_dir, capture_output=True, text=True,
             timeout=COMPILE_TIMEOUT, env=env,
@@ -195,7 +232,7 @@ def compile_project(directory, main_file, engine=None, project_id=None):
         # BibTeX
         if needs_bib and shutil.which(BIBTEX_CMD):
             bib_base = os.path.splitext(main_basename)[0]
-            print('[Compile] Running BibTeX...')
+            print('[Cloud Compile] Running BibTeX...')
             rb = subprocess.run(
                 [BIBTEX_CMD, bib_base], cwd=work_dir, capture_output=True,
                 text=True, timeout=60, env=env,
@@ -206,7 +243,7 @@ def compile_project(directory, main_file, engine=None, project_id=None):
         # Passos 2 e 3
         if needs_rerun:
             for i in range(2):
-                print(f'[Compile] Pass {i + 2}...')
+                print(f'[Cloud Compile] Pass {i + 2}...')
                 ri = subprocess.run(
                     base_cmd, cwd=work_dir, capture_output=True, text=True,
                     timeout=COMPILE_TIMEOUT, env=env,
@@ -219,20 +256,109 @@ def compile_project(directory, main_file, engine=None, project_id=None):
         actual_pdf = os.path.join(work_dir, os.path.splitext(main_basename)[0] + '.pdf')
         if os.path.isfile(actual_pdf):
             size_mb = os.path.getsize(actual_pdf) / (1024 * 1024)
-            print(f'[Compile] [OK] PDF gerado ({size_mb:.1f} MB)')
+            print(f'[Cloud Compile] [OK] PDF gerado ({size_mb:.1f} MB)')
+            
+            # Upload para cloud storage se configurado
+            public_url = None
+            if project_id and USE_CLOUD_STORAGE:
+                blob_name = f"projects/{project_id}/output.pdf"
+                public_url = upload_to_gcs(actual_pdf, blob_name)
+            
             return {
                 'success': True, 
                 'pdf_path': actual_pdf, 
-                'log': full_log
+                'log': full_log,
+                'public_url': public_url
             }
         else:
-            print('[Compile] [ERR] PDF não gerado')
+            print('[Cloud Compile] [ERR] PDF não gerado')
             return {'success': False, 'log': full_log}
             
     except subprocess.TimeoutExpired:
         return {'success': False, 'log': f'Timeout ({COMPILE_TIMEOUT}s) expirado.'}
     except Exception as e:
         return {'success': False, 'log': f'Erro: {str(e)}'}
+
+# ═══════════════════════════════════════════════════════════════════
+#  PDF to Word Conversion
+# ═══════════════════════════════════════════════════════════════════
+
+def convert_pdf_to_word(pdf_path):
+    """
+    Converte PDF para DOCX usando LibreOffice ou pandoc.
+    Tenta múltiplas estratégias em ordem de preferência.
+    """
+    output_dir = os.path.dirname(pdf_path)
+    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    docx_path = os.path.join(output_dir, f"{base_name}.docx")
+    
+    # Estratégia 1: LibreOffice (melhor qualidade para LaTeX)
+    if shutil.which('libreoffice'):
+        try:
+            print(f'[Convert] Tentando LibreOffice...')
+            cmd = [
+                'libreoffice', 
+                '--headless', 
+                '--convert-to', 'docx',
+                '--outdir', output_dir,
+                pdf_path
+            ]
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                timeout=60
+            )
+            if result.returncode == 0 and os.path.isfile(docx_path):
+                print(f'[Convert] LibreOffice sucesso: {docx_path}')
+                return docx_path
+            else:
+                print(f'[Convert] LibreOffice falhou: {result.stderr}')
+        except Exception as e:
+            print(f'[Convert] LibreOffice erro: {e}')
+    
+    # Estratégia 2: Pandoc (se disponível)
+    if shutil.which('pandoc'):
+        try:
+            print(f'[Convert] Tentando pandoc...')
+            # Pandoc funciona melhor com LaTeX direto, mas tentamos PDF
+            cmd = [
+                'pandoc',
+                '-f', 'pdf',
+                '-t', 'docx',
+                '-o', docx_path,
+                pdf_path
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0 and os.path.isfile(docx_path):
+                print(f'[Convert] Pandoc sucesso: {docx_path}')
+                return docx_path
+            else:
+                print(f'[Convert] Pandoc falhou: {result.stderr}')
+        except Exception as e:
+            print(f'[Convert] Pandoc erro: {e}')
+    
+    # Estratégia 3: pdf2docx (biblioteca Python)
+    try:
+        from pdf2docx import Converter
+        print(f'[Convert] Tentando pdf2docx...')
+        cv = Converter(pdf_path)
+        cv.convert(docx_path, start=0, end=None)
+        cv.close()
+        if os.path.isfile(docx_path):
+            print(f'[Convert] pdf2docx sucesso: {docx_path}')
+            return docx_path
+    except ImportError:
+        print('[Convert] pdf2docx não instalado')
+    except Exception as e:
+        print(f'[Convert] pdf2docx erro: {e}')
+    
+    return None
 
 # ═══════════════════════════════════════════════════════════════════
 #  Endpoints
@@ -242,74 +368,31 @@ LANDING_PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Overleaf Hybrid Compiler</title>
+    <title>Overleaf Cloud Compiler</title>
     <style>
-        body { 
-            font-family: system-ui, -apple-system, sans-serif; 
-            max-width: 800px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background: #0f172a;
-            color: #e2e8f0;
-        }
-        .status { 
-            padding: 20px; 
-            border-radius: 12px; 
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-            border: 1px solid #475569;
-        }
-        .ok { color: #22c55e; }
-        .warning { color: #f59e0b; }
-        code { 
-            background: #1e293b; 
-            padding: 2px 6px; 
-            border-radius: 4px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-        .env-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .env-cloud { background: #3b82f6; color: white; }
-        .env-local { background: #10b981; color: white; }
-        h1 { margin-bottom: 8px; }
-        .subtitle { color: #94a3b8; margin-bottom: 24px; }
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        .status { padding: 20px; border-radius: 8px; background: #f0f9ff; border: 1px solid #0ea5e9; }
+        .ok { color: #059669; }
+        code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
     </style>
 </head>
 <body>
-    <h1>🚀 Overleaf Hybrid Compiler</h1>
-    <div class="subtitle">Compilador LaTeX para Overleaf - Online & Local</div>
-    
+    <h1>🚀 Overleaf Cloud Compiler</h1>
     <div class="status">
-        <span class="env-badge {{ 'env-cloud' if is_cloud else 'env-local' }}">
-            {{ '☁️ MODO CLOUD' if is_cloud else '🖥️ MODO LOCAL' }}
-        </span>
-        
         <h2>Status do Servidor</h2>
         <p><strong>Status:</strong> <span class="ok">✓ Online</span></p>
         <p><strong>Motores disponíveis:</strong> {{ engines|join(', ') }}</p>
-        <p><strong>Versão:</strong> 2.1.0-hybrid</p>
-        <p><strong>Cache:</strong> <code>{{ cache_dir }}</code></p>
+        <p><strong>Versão:</strong> 2.1.0-cloud</p>
     </div>
-    
     <h2>Endpoints</h2>
     <ul>
         <li><code>GET /status</code> - Health check</li>
         <li><code>POST /compile</code> - Compilar arquivos JSON</li>
         <li><code>POST /compile-zip</code> - Compilar ZIP</li>
+        <li><code>POST /compile-delta</code> - Compilação incremental (delta)</li>
+        <li><code>POST /convert/word</code> - Converter PDF para DOCX</li>
     </ul>
-    
-    <h2>Configuração Extensão Chrome</h2>
-    <p>URL do servidor: <code>{{ server_url }}</code></p>
-    {% if auth_token %}
-    <p>Token de acesso: <code>{{ auth_token[:8] }}...</code> (configurado)</p>
-    {% else %}
-    <p class="warning">⚠️ Sem token de autenticação (apenas local)</p>
-    {% endif %}
+    <p><em>Para uso com a extensão Chrome, configure a URL deste servidor.</em></p>
 </body>
 </html>
 """
@@ -318,16 +401,7 @@ LANDING_PAGE = """
 def index():
     """Página inicial com status."""
     engines = detect_available_engines()
-    server_url = request.host_url.rstrip('/')
-    
-    return render_template_string(
-        LANDING_PAGE,
-        is_cloud=IS_CLOUD,
-        engines=engines,
-        cache_dir=CACHE_DIR,
-        server_url=server_url,
-        auth_token=AUTH_TOKEN
-    )
+    return render_template_string(LANDING_PAGE, engines=engines)
 
 @app.route('/status', methods=['GET'])
 def status():
@@ -338,15 +412,19 @@ def status():
         'engines': engines,
         'default_engine': DEFAULT_ENGINE,
         'compile_timeout': COMPILE_TIMEOUT,
-        'is_cloud': bool(IS_CLOUD),
-        'version': '2.1.0-hybrid',
-        'timestamp': datetime.utcnow().isoformat()
+        'cloud_storage': USE_CLOUD_STORAGE,
+        'version': '2.1.0-cloud',
+        'features': ['compile', 'compile-zip', 'compile-delta', 'convert-word']
     })
 
 @app.route('/compile', methods=['POST'])
 @require_auth
 def compile_latex():
     """Compilar arquivos .tex enviados como JSON."""
+    origin_check = check_origin()
+    if origin_check:
+        return origin_check
+    
     data = request.get_json(force=True)
     files = data.get('files', {})
     main_file = data.get('mainFile', 'main.tex')
@@ -356,14 +434,8 @@ def compile_latex():
     if not files:
         return jsonify({'error': 'Nenhum arquivo recebido.'}), 400
     
-    # Determinar diretório de trabalho
-    if project_id:
-        work_dir = get_project_cache_dir(project_id)
-        os.makedirs(work_dir, exist_ok=True)
-    else:
-        work_dir = tempfile.mkdtemp(dir='/tmp' if IS_CLOUD else None, prefix='olc_')
-    
-    try:
+    # Usar diretório temporário em /tmp (escrita permitida em Cloud Run)
+    with tempfile.TemporaryDirectory(dir='/tmp', prefix='olc_') as work_dir:
         # Escrever arquivos
         for filename, content in files.items():
             filepath = os.path.join(work_dir, filename)
@@ -383,23 +455,25 @@ def compile_latex():
                 as_attachment=True,
                 download_name='output.pdf'
             )
+            
+            # Adicionar headers CORS
             response.headers['Access-Control-Allow-Origin'] = '*'
             return response
         else:
             return jsonify({
                 'error': 'Compilação falhou.',
-                'log': result['log'][-5000:]
+                'log': result['log'][-5000:],  # Aumentado para cloud
+                'public_url': result.get('public_url')
             }), 500
-            
-    finally:
-        # Cleanup se não estiver usando cache persistente
-        if not project_id and not IS_CLOUD:
-            shutil.rmtree(work_dir, ignore_errors=True)
 
 @app.route('/compile-zip', methods=['POST'])
 @require_auth
 def compile_zip():
     """Compilar projeto enviado como ZIP."""
+    origin_check = check_origin()
+    if origin_check:
+        return origin_check
+    
     if 'project' not in request.files:
         return jsonify({'error': 'Nenhum arquivo ZIP recebido.'}), 400
     
@@ -407,104 +481,96 @@ def compile_zip():
     engine = request.form.get('engine', DEFAULT_ENGINE)
     project_id = request.form.get('projectId')
     
-    if project_id:
-        work_dir = get_project_cache_dir(project_id)
-        os.makedirs(work_dir, exist_ok=True)
-    else:
-        work_dir = tempfile.mkdtemp(dir='/tmp' if IS_CLOUD else None, prefix='olc_zip_')
-    
-    try:
-        with zipfile.ZipFile(zip_file, 'r') as z:
-            z.extractall(work_dir)
-    except zipfile.BadZipFile:
-        return jsonify({'error': 'Arquivo ZIP inválido.'}), 400
-    
-    main_file = find_main_file(work_dir)
-    if not main_file:
-        return jsonify({'error': 'Nenhum arquivo .tex encontrado no ZIP.'}), 400
-    
-    result = compile_project(work_dir, main_file, engine, project_id)
-    
-    if result['success']:
-        with open(result['pdf_path'], 'rb') as f:
-            pdf_data = io.BytesIO(f.read())
+    with tempfile.TemporaryDirectory(dir='/tmp', prefix='olc_zip_') as tmp_dir:
+        extract_dir = os.path.join(tmp_dir, 'project')
+        os.makedirs(extract_dir, exist_ok=True)
         
-        response = send_file(
-            pdf_data,
-            mimetype='application/pdf',
-            as_attachment=True,
-            download_name='output.pdf'
-        )
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
-    else:
-        return jsonify({
-            'error': 'Compilação falhou.',
-            'log': result['log'][-5000:]
-        }), 500
+        try:
+            with zipfile.ZipFile(zip_file, 'r') as z:
+                z.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            return jsonify({'error': 'Arquivo ZIP inválido.'}), 400
+        
+        main_file = find_main_file(extract_dir)
+        if not main_file:
+            return jsonify({'error': 'Nenhum arquivo .tex encontrado no ZIP.'}), 400
+        
+        result = compile_project(extract_dir, main_file, engine, project_id)
+        
+        if result['success']:
+            with open(result['pdf_path'], 'rb') as f:
+                pdf_data = io.BytesIO(f.read())
+            
+            response = send_file(
+                pdf_data,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name='output.pdf'
+            )
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+        else:
+            return jsonify({
+                'error': 'Compilação falhou.',
+                'log': result['log'][-5000:],
+                'public_url': result.get('public_url')
+            }), 500
 
 @app.route('/compile-delta', methods=['POST'])
 @require_auth
 def compile_delta():
-    """Compilar usando atualização incremental (delta)."""
-    project_id = request.form.get('projectId')
+    """
+    Compilação incremental: aplica mudanças (delta) a um projeto existente.
+    """
+    origin_check = check_origin()
+    if origin_check:
+        return origin_check
+    
+    if 'delta_zip' not in request.files:
+        return jsonify({'error': 'Nenhum delta ZIP recebido.'}), 400
+    
+    delta_file = request.files['delta_zip']
+    deleted_files = json.loads(request.form.get('deleted_files', '[]'))
+    project_id = request.form.get('projectId', '')
     engine = request.form.get('engine', DEFAULT_ENGINE)
     
     if not project_id:
-        return jsonify({'error': 'Project ID obrigatório para compilação incremental.'}), 400
-
-    work_dir = get_project_cache_dir(project_id)
+        return jsonify({'error': 'projectId é obrigatório para compilação delta.'}), 400
     
-    # Se o diretório não existe, o cache foi limpo ou nunca existiu.
-    # Retorna 410 Gone para o cliente saber que deve enviar o ZIP completo.
-    if not os.path.isdir(work_dir):
-        return jsonify({'error': 'CACHE_MISS', 'message': 'Cache não encontrado. Envie ZIP completo.'}), 410
-
+    # Verificar se temos o projeto em cache
+    if project_id not in project_cache:
+        return jsonify({'error': 'CACHE_MISS', 'message': 'Projeto não encontrado no cache.'}), 410
+    
+    cache_info = project_cache[project_id]
+    project_dir = cache_info['directory']
+    
+    # Verificar se diretório ainda existe
+    if not os.path.exists(project_dir):
+        del project_cache[project_id]
+        return jsonify({'error': 'CACHE_MISS', 'message': 'Diretório de cache não existe mais.'}), 410
+    
     try:
-        # 1. Processar Deletes
-        deleted_files_json = request.form.get('deleted_files')
-        if deleted_files_json:
-            try:
-                deleted_files = json.loads(deleted_files_json)
-                for filename in deleted_files:
-                    # Garantir segurança do path
-                    safe_filename = os.path.normpath(filename)
-                    if safe_filename.startswith('..') or os.path.isabs(safe_filename):
-                        continue
-                        
-                    file_path = os.path.join(work_dir, safe_filename)
-                    if os.path.exists(file_path):
-                        if os.path.isdir(file_path):
-                            shutil.rmtree(file_path)
-                        else:
-                            os.remove(file_path)
-                        print(f'[Delta] Deleted: {filename}')
-            except json.JSONDecodeError:
-                print('[Delta] Erro ao decodificar deleted_files')
-
-        # 2. Processar Updates (Delta ZIP)
-        if 'delta_zip' in request.files:
-            delta_zip = request.files['delta_zip']
-            # Se o ZIP não estiver vazio (tamanho > 0 ou valid zip header)
-            # JSZip vazio tem ~22 bytes. 
-            delta_zip.seek(0, os.SEEK_END)
-            size = delta_zip.tell()
-            delta_zip.seek(0)
-            
-            if size > 22: # header vazio zip
-                try:
-                    with zipfile.ZipFile(delta_zip, 'r') as z:
-                        z.extractall(work_dir)
-                        print(f'[Delta] Extracted {len(z.namelist())} updated files.')
-                except zipfile.BadZipFile:
-                    return jsonify({'error': 'Arquivo Delta ZIP inválido.'}), 400
+        # Aplicar deleções
+        for filepath in deleted_files:
+            full_path = os.path.join(project_dir, filepath)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+                print(f'[Delta] Deletado: {filepath}')
         
-        # 3. Compilar
-        main_file = find_main_file(work_dir)
+        # Aplicar atualizações do delta
+        with zipfile.ZipFile(delta_file, 'r') as z:
+            z.extractall(project_dir)
+        
+        # Recompilar
+        main_file = cache_info.get('main_file') or find_main_file(project_dir)
         if not main_file:
-            return jsonify({'error': 'Nenhum arquivo .tex encontrado no projeto.'}), 400
+            return jsonify({'error': 'Nenhum arquivo .tex encontrado.'}), 400
         
-        result = compile_project(work_dir, main_file, engine, project_id)
+        # Atualizar cache
+        project_cache[project_id]['main_file'] = main_file
+        project_cache[project_id]['timestamp'] = os.time()
+        
+        result = compile_project(project_dir, main_file, engine, project_id)
         
         if result['success']:
             with open(result['pdf_path'], 'rb') as f:
@@ -523,86 +589,72 @@ def compile_delta():
                 'error': 'Compilação falhou.',
                 'log': result['log'][-5000:]
             }), 500
-
+            
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': f'Erro processando delta: {str(e)}'}), 500
+        return jsonify({'error': f'Erro ao aplicar delta: {str(e)}'}), 500
+
+@app.route('/convert/word', methods=['POST'])
+@require_auth
+def convert_word():
+    """
+    Converte PDF para DOCX.
+    Recebe arquivo PDF, retorna DOCX.
+    """
+    origin_check = check_origin()
+    if origin_check:
+        return origin_check
+    
+    if 'pdf' not in request.files:
+        return jsonify({'error': 'Nenhum arquivo PDF recebido.'}), 400
+    
+    pdf_file = request.files['pdf']
+    
+    with tempfile.TemporaryDirectory(dir='/tmp', prefix='olc_convert_') as tmp_dir:
+        pdf_path = os.path.join(tmp_dir, 'input.pdf')
+        pdf_file.save(pdf_path)
+        
+        # Converter
+        docx_path = convert_pdf_to_word(pdf_path)
+        
+        if docx_path and os.path.isfile(docx_path):
+            with open(docx_path, 'rb') as f:
+                docx_data = io.BytesIO(f.read())
+            
+            response = send_file(
+                docx_data,
+                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                as_attachment=True,
+                download_name='documento.docx'
+            )
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+        else:
+            return jsonify({
+                'error': 'Conversão falhou. Verifique se LibreOffice ou pandoc estão instalados.'
+            }), 500
 
 # ═══════════════════════════════════════════════════════════════════
 #  Main
 # ═══════════════════════════════════════════════════════════════════
 
-
-# ═══════════════════════════════════════════════════════════════════
-#  Additional Features: PDF to Word
-# ═══════════════════════════════════════════════════════════════════
-
-@app.route('/convert/word', methods=['POST'])
-def convert_to_word():
-    """
-    Converte PDF para Word.
-    Recebe um arquivo PDF via form-data 'pdf'.
-    Retorna o arquivo .docx convertido.
-    """
-    if 'pdf' not in request.files:
-        return jsonify({'error': 'Arquivo PDF não enviado.'}), 400
-        
-    pdf_file = request.files['pdf']
-    if pdf_file.filename == '':
-        return jsonify({'error': 'Nome de arquivo vazio.'}), 400
-
-    # Criar diretório temporário para a conversão
-    with tempfile.TemporaryDirectory() as temp_dir:
-        input_path = os.path.join(temp_dir, 'input.pdf')
-        output_path = os.path.join(temp_dir, 'documento.docx')
-        
-        try:
-            # Salvar PDF
-            pdf_file.save(input_path)
-            
-            # Converter
-            cv = Converter(input_path)
-            cv.convert(output_path)
-            cv.close()
-            
-            # Streaming do arquivo de volta
-            return_data = io.BytesIO()
-            with open(output_path, 'rb') as f:
-                return_data.write(f.read())
-            return_data.seek(0)
-            
-            return send_file(
-                return_data,
-                as_attachment=True,
-                download_name='documento.docx',
-                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            )
-            
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({'error': f'Erro na conversão: {str(e)}'}), 500
-
 if __name__ == '__main__':
     engines = detect_available_engines()
     
     print('╔════════════════════════════════════════════════════════════╗')
-    print('║     Overleaf Hybrid Compiler v2.1                        ║')
+    print('║     Overleaf Cloud Compiler v2.1                          ║')
     print('╠════════════════════════════════════════════════════════════╣')
-    print(f'  Ambiente:  {"☁️ CLOUD" if IS_CLOUD else "🖥️ LOCAL"}')
     print(f'  Port:      {PORT}')
     print(f'  Engine:    {DEFAULT_ENGINE}')
     print(f'  Motores:   {", ".join(engines) if engines else "NENHUM!"}')
     print(f'  Timeout:   {COMPILE_TIMEOUT}s')
     print(f'  Max Size:  {MAX_REQUEST_SIZE}MB')
     print(f'  Auth:      {"Ativo" if AUTH_TOKEN else "Desativado"}')
-    print(f'  Cache:     {CACHE_DIR}')
+    print(f'  Cloud:     {"GCS" if USE_CLOUD_STORAGE else "Disco local"}')
     print('╚════════════════════════════════════════════════════════════╝')
     
     if not engines:
         print('⚠️  AVISO: Nenhum motor LaTeX encontrado!')
-        if IS_CLOUD:
-            print('   Verifique se o Dockerfile está correto.')
-        else:
-            print('   Instale MiKTeX (Windows) ou TeX Live (Linux/Mac).')
+        print('   Certifique-se de que o Dockerfile está usando texlive/texlive:latest-full')
     
-    app.run(host=HOST, port=PORT, debug=False)
+    # Em produção, não use debug=True
+    app.run(host='0.0.0.0', port=PORT, debug=False)
