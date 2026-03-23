@@ -31,28 +31,15 @@ from flask import Flask, request, send_file, jsonify, render_template_string
 from flask_cors import CORS
 
 # ═══════════════════════════════════════════════════════════════════
-#  Configuration (Cloud-Optimized)
+#  Configuration (Local Optimized)
 # ═══════════════════════════════════════════════════════════════════
 
 SUPPORTED_ENGINES = ['pdflatex', 'xelatex', 'lualatex']
 DEFAULT_ENGINE = os.environ.get('LATEX_ENGINE', 'pdflatex')
 BIBTEX_CMD = 'bibtex'
 COMPILE_TIMEOUT = int(os.environ.get('COMPILE_TIMEOUT', '300'))
-PORT = int(os.environ.get('PORT', '8080'))
-AUTH_TOKEN = os.environ.get('AUTH_TOKEN')  # Obrigatório em produção!
+PORT = int(os.environ.get('PORT', '8765'))
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', '50'))  # MB
-
-# Cloud storage para cache (opcional)
-USE_CLOUD_STORAGE = os.environ.get('USE_CLOUD_STORAGE', 'false').lower() == 'true'
-if USE_CLOUD_STORAGE:
-    try:
-        from google.cloud import storage
-        GCS_BUCKET = os.environ.get('GCS_BUCKET')
-        storage_client = storage.Client()
-        print(f"[Cloud] Google Cloud Storage ativado: {GCS_BUCKET}")
-    except ImportError:
-        USE_CLOUD_STORAGE = False
-        print("[Cloud] google-cloud-storage não instalado, usando disco local")
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -69,35 +56,8 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE * 1024 * 1024
 # Cache para projetos (para compilação delta)
 project_cache = {}  # projectId -> {files, timestamp}
 
-# ═══════════════════════════════════════════════════════════════════
-#  Cloud Storage Helpers
-# ═══════════════════════════════════════════════════════════════════
-
-def upload_to_gcs(local_path, destination_blob_name):
-    """Upload arquivo para Google Cloud Storage."""
-    if not USE_CLOUD_STORAGE:
-        return None
-    try:
-        bucket = storage_client.bucket(GCS_BUCKET)
-        blob = bucket.blob(destination_blob_name)
-        blob.upload_from_filename(local_path)
-        return blob.public_url
-    except Exception as e:
-        print(f"[GCS] Erro no upload: {e}")
-        return None
-
-def download_from_gcs(source_blob_name, destination_path):
-    """Download arquivo do Google Cloud Storage."""
-    if not USE_CLOUD_STORAGE:
-        return False
-    try:
-        bucket = storage_client.bucket(GCS_BUCKET)
-        blob = bucket.blob(source_blob_name)
-        blob.download_to_filename(destination_path)
-        return True
-    except Exception as e:
-        print(f"[GCS] Erro no download: {e}")
-        return False
+# Cache para projetos (para compilação delta)
+project_cache = {}  # projectId -> {files, timestamp}
 
 # ═══════════════════════════════════════════════════════════════════
 #  Security & Error Handling
@@ -116,25 +76,6 @@ def handle_exception(e):
 @app.errorhandler(413)
 def handle_too_large(e):
     return jsonify({'error': f'Arquivo muito grande (limite: {MAX_REQUEST_SIZE}MB).'}), 413
-
-def require_auth(f):
-    """Decorator para exigir autenticação em produção."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if AUTH_TOKEN:
-            auth = request.headers.get('Authorization')
-            if not auth or auth != f'Bearer {AUTH_TOKEN}':
-                return jsonify({'error': 'Unauthorized - Token inválido ou ausente'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
-
-def check_origin():
-    """Verifica origem da requisição (proteção básica)."""
-    allowed_origins = os.environ.get('ALLOWED_ORIGINS', '').split(',')
-    origin = request.headers.get('Origin', '')
-    if allowed_origins and allowed_origins[0] and origin not in allowed_origins:
-        return jsonify({'error': 'Origin not allowed'}), 403
-    return None
 
 # ═══════════════════════════════════════════════════════════════════
 #  Utility Functions (Mesmas funções, otimizadas para cloud)
@@ -256,22 +197,13 @@ def compile_project(directory, main_file, engine=None, project_id=None):
         actual_pdf = os.path.join(work_dir, os.path.splitext(main_basename)[0] + '.pdf')
         if os.path.isfile(actual_pdf):
             size_mb = os.path.getsize(actual_pdf) / (1024 * 1024)
-            print(f'[Cloud Compile] [OK] PDF gerado ({size_mb:.1f} MB)')
-            
-            # Upload para cloud storage se configurado
-            public_url = None
-            if project_id and USE_CLOUD_STORAGE:
-                blob_name = f"projects/{project_id}/output.pdf"
-                public_url = upload_to_gcs(actual_pdf, blob_name)
-            
             return {
                 'success': True, 
                 'pdf_path': actual_pdf, 
-                'log': full_log,
-                'public_url': public_url
+                'log': full_log
             }
         else:
-            print('[Cloud Compile] [ERR] PDF não gerado')
+            print('[Local Compile] [ERR] PDF não gerado')
             return {'success': False, 'log': full_log}
             
     except subprocess.TimeoutExpired:
@@ -380,9 +312,9 @@ LANDING_PAGE = """
     <h1>🚀 Overleaf Cloud Compiler</h1>
     <div class="status">
         <h2>Status do Servidor</h2>
-        <p><strong>Status:</strong> <span class="ok">✓ Online</span></p>
+        <p><strong>Status:</strong> <span class="ok">✓ Online (Local)</span></p>
         <p><strong>Motores disponíveis:</strong> {{ engines|join(', ') }}</p>
-        <p><strong>Versão:</strong> 2.1.0-cloud</p>
+        <p><strong>Versão:</strong> 2.2.0-local</p>
     </div>
     <h2>Endpoints</h2>
     <ul>
@@ -412,18 +344,13 @@ def status():
         'engines': engines,
         'default_engine': DEFAULT_ENGINE,
         'compile_timeout': COMPILE_TIMEOUT,
-        'cloud_storage': USE_CLOUD_STORAGE,
-        'version': '2.1.0-cloud',
+        'version': '2.2.0-local',
         'features': ['compile', 'compile-zip', 'compile-delta', 'convert-word']
     })
 
 @app.route('/compile', methods=['POST'])
-@require_auth
 def compile_latex():
     """Compilar arquivos .tex enviados como JSON."""
-    origin_check = check_origin()
-    if origin_check:
-        return origin_check
     
     data = request.get_json(force=True)
     files = data.get('files', {})
@@ -467,12 +394,8 @@ def compile_latex():
             }), 500
 
 @app.route('/compile-zip', methods=['POST'])
-@require_auth
 def compile_zip():
     """Compilar projeto enviado como ZIP."""
-    origin_check = check_origin()
-    if origin_check:
-        return origin_check
     
     if 'project' not in request.files:
         return jsonify({'error': 'Nenhum arquivo ZIP recebido.'}), 400
@@ -517,14 +440,10 @@ def compile_zip():
             }), 500
 
 @app.route('/compile-delta', methods=['POST'])
-@require_auth
 def compile_delta():
     """
     Compilação incremental: aplica mudanças (delta) a um projeto existente.
     """
-    origin_check = check_origin()
-    if origin_check:
-        return origin_check
     
     if 'delta_zip' not in request.files:
         return jsonify({'error': 'Nenhum delta ZIP recebido.'}), 400
@@ -594,15 +513,11 @@ def compile_delta():
         return jsonify({'error': f'Erro ao aplicar delta: {str(e)}'}), 500
 
 @app.route('/convert/word', methods=['POST'])
-@require_auth
 def convert_word():
     """
     Converte PDF para DOCX.
     Recebe arquivo PDF, retorna DOCX.
     """
-    origin_check = check_origin()
-    if origin_check:
-        return origin_check
     
     if 'pdf' not in request.files:
         return jsonify({'error': 'Nenhum arquivo PDF recebido.'}), 400
@@ -648,8 +563,8 @@ if __name__ == '__main__':
     print(f'  Motores:   {", ".join(engines) if engines else "NENHUM!"}')
     print(f'  Timeout:   {COMPILE_TIMEOUT}s')
     print(f'  Max Size:  {MAX_REQUEST_SIZE}MB')
-    print(f'  Auth:      {"Ativo" if AUTH_TOKEN else "Desativado"}')
-    print(f'  Cloud:     {"GCS" if USE_CLOUD_STORAGE else "Disco local"}')
+    print(f'  Auth:      Desativado')
+    print(f'  Mode:      Local')
     print('╚════════════════════════════════════════════════════════════╝')
     
     if not engines:

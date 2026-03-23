@@ -12,7 +12,6 @@ async function getServerConfig() {
         'serverUrl',
         'cloudUrl',
         'useCloud',
-        'authToken',
         'latexEngine',
         'autoFallback'
     ]);
@@ -21,7 +20,6 @@ async function getServerConfig() {
         localUrl: result.serverUrl || DEFAULT_LOCAL,
         cloudUrl: result.cloudUrl || '',
         useCloud: result.useCloud || false,
-        authToken: result.authToken || '',
         engine: result.latexEngine || 'pdflatex',
         autoFallback: result.autoFallback !== false // default true
     };
@@ -30,17 +28,13 @@ async function getServerConfig() {
 /**
  * Check if server is online
  */
-async function checkServer(url, authToken = '') {
+async function checkServer(url) {
     try {
-        const headers = {};
-        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 3000);
 
         const response = await fetch(`${url}/status`, {
-            signal: controller.signal,
-            headers
+            signal: controller.signal
         });
         clearTimeout(timeout);
 
@@ -62,7 +56,7 @@ async function getBestServer() {
 
     // Se usuário forçou modo cloud
     if (config.useCloud && config.cloudUrl) {
-        const cloudCheck = await checkServer(config.cloudUrl, config.authToken);
+        const cloudCheck = await checkServer(config.cloudUrl);
         if (cloudCheck.online) return { ...cloudCheck, mode: 'cloud' };
         return { online: false, error: 'Servidor cloud indisponível' };
     }
@@ -73,7 +67,7 @@ async function getBestServer() {
 
     // Fallback para cloud se habilitado
     if (config.autoFallback && config.cloudUrl) {
-        const cloudCheck = await checkServer(config.cloudUrl, config.authToken);
+        const cloudCheck = await checkServer(config.cloudUrl);
         if (cloudCheck.online) {
             // Notifica usuário sobre fallback
             try {
@@ -150,9 +144,6 @@ async function handleDeltaCompilation(data) {
 
     const config = await getServerConfig();
     const headers = {};
-    if (config.authToken && server.mode === 'cloud') {
-        headers['Authorization'] = `Bearer ${config.authToken}`;
-    }
 
     const formData = new FormData();
     const blob = new Blob([new Uint8Array(data.blob)], { type: 'application/zip' });
@@ -212,9 +203,6 @@ async function handleCompilation(projectData) {
 
     const config = await getServerConfig();
     const headers = {};
-    if (config.authToken && server.mode === 'cloud') {
-        headers['Authorization'] = `Bearer ${config.authToken}`;
-    }
 
     // Compilação via ZIP (mais confiável)
     if (projectData.type === 'zip' || projectData.blob) {
@@ -309,7 +297,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         const config = await getServerConfig();
                         const [local, cloud] = await Promise.all([
                             checkServer(config.localUrl),
-                            config.cloudUrl ? checkServer(config.cloudUrl, config.authToken) : Promise.resolve({ online: false })
+                            config.cloudUrl ? checkServer(config.cloudUrl) : Promise.resolve({ online: false })
                         ]);
                         sendResponse({ local, cloud, config });
                     } catch (error) {

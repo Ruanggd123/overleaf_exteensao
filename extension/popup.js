@@ -5,7 +5,6 @@ document.addEventListener('DOMContentLoaded', () => {
         extensionToggle: document.getElementById('extension-toggle'),
         localUrl: document.getElementById('local-url'),
         cloudUrl: document.getElementById('cloud-url'),
-        authToken: document.getElementById('auth-token'),
         autoFallback: document.getElementById('auto-fallback'),
         btnSave: document.getElementById('btn-save'),
         localDot: document.getElementById('local-dot'),
@@ -16,11 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Load Settings
-    chrome.storage.local.get(['showExtension', 'localUrl', 'cloudUrl', 'authToken', 'autoFallback'], (data) => {
+    chrome.storage.local.get(['showExtension', 'localUrl', 'cloudUrl', 'autoFallback'], (data) => {
         els.extensionToggle.checked = data.showExtension !== false; // Default true
         els.localUrl.value = data.localUrl || 'http://localhost:8765';
         els.cloudUrl.value = data.cloudUrl || '';
-        els.authToken.value = data.authToken || '';
         els.autoFallback.checked = data.autoFallback !== false; // Default true
 
         checkStatus();
@@ -40,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
             showExtension: els.extensionToggle.checked,
             localUrl: els.localUrl.value.trim(),
             cloudUrl: els.cloudUrl.value.trim(),
-            authToken: els.authToken.value.trim(),
             autoFallback: els.autoFallback.checked
         }, () => {
             showToast('Salvo com sucesso!');
