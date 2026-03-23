@@ -1,0 +1,7 @@
+\babel@toc {brazil}{}\relax 
+\contentsline {figure}{\numberline {1}{\ignorespaces Arquitetura geral do \textit {Federated Learning}}}{14}{figure.caption.7}%
+\contentsline {figure}{\numberline {2}{\ignorespaces Ciclo típico de treinamento em \textit {Federated Learning} com potencial para ataques de \textit {poisoning}}}{17}{figure.caption.8}%
+\contentsline {figure}{\numberline {3}{\ignorespaces Compromisso entre robustez (baixa degradação) e desempenho limpo (Acc) - MNIST}}{28}{figure.caption.16}%
+\contentsline {figure}{\numberline {4}{\ignorespaces Média de degradação relativa (\%) por agregador e tipo de ataque no MNIST}}{29}{figure.caption.17}%
+\contentsline {figure}{\numberline {5}{\ignorespaces Curva de aprendizado sob ataque Sign-Flip ($f_{mal}=0.40$, $\alpha =0.5$) - MNIST}}{30}{figure.caption.18}%
+\contentsline {figure}{\numberline {6}{\ignorespaces Comparativo da Acurácia Robusta em presença dos ataques executados para o domínio Fashion-MNIST}}{31}{figure.caption.20}%

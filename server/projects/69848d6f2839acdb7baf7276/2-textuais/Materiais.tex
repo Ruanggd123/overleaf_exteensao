@@ -1,0 +1,101 @@
+\chapter{Materiais e Métodos}
+\label{chap:materiais}
+
+O método empregado será de natureza descritiva e exploratória. Para isso, será realizada uma revisão bibliográfica que permitirá identificar as principais contribuições teóricas e práticas existentes na literatura acadêmica sobre o tema. Além disso, será feita uma análise qualitativa, utilizando técnicas de revisão sistemática associadas à mineração de texto para extrair dados de artigos acadêmicos, com o objetivo de identificar a frequência de termos e conceitos relevantes relacionados ao impacto do 5G na telemedicina. Esses resultados serão posteriormente interpretados para fornecer uma base sólida de compreensão sobre o panorama atual e as perspectivas futuras desta interação entre tecnologia e saúde.
+
+\section{Revisão sistemática}
+
+A revisão sistemática é um método de investigação científica que busca reunir e sintetizar criticamente os resultados de diversos estudos primários, seguindo critérios bem definidos para identificação, seleção e análise das pesquisas mais relevantes sobre um determinado tema. Esse tipo de revisão permite responder a uma pergunta específica de forma estruturada, garantindo maior confiabilidade nos achados \cite{Cordeiro2007}.
+
+Nesse ínterim, a revisão sistemática visa identificar e analisar os principais artigos sobre o impacto do 5G na telemedicina, seguindo critérios de inclusão e exclusão. As etapas da revisao estão dispostas sequencialmente na Figura x.
+
+\begin{figure}[h!]
+  \captionsetup{justification=centering}
+  \centering
+  \caption{Etapas da revisão sistemática}
+  \includegraphics[width= 1\textwidth]{figuras/revisao sistematica.png}
+  \fonte{Autor}
+  \label{figs:revisaoSistematica}
+\end{figure}
+
+\subsection{Fazer uma pergunta}
+
+Este trabalho tem como objetivo explorar a literatura científica por meio de uma investigação baseada na seguinte questão: Quais são os principais impactos do 5G na telemedicina, segundo a literatura científica?
+
+\subsection{Definir critérios de inclusão e exclusão}
+
+Os critérios de inclusão e exclusão se referem as características que um texto acadêmico precisa ter para entrar no processo de revisão sistemática sobre determinado tema. Neste trabalho, Os critérios de inclusão:
+
+\begin{itemize}
+    \item Artigos publicados em periódicos revisados por pares;
+    \item Artigos publicados a partir de 1990 que abordem Telemedicina;
+    \item Estudos publicados a partir de 2019 que abordem 5G e Telemedicina;
+    \item Inclusão de artigos em qualquer idioma;
+    \item Material de estudo quantitativo e qualitativo sobre 5G e Telemedicina.
+\end{itemize}
+
+\noindent Por conseguinte, os critérios de exclusão são:
+
+\begin{itemize}
+    \item Trabalhos que não tratam diretamente de 5G e/ou telemedicina;
+    \item Artigos duplicados encontrados em mais de uma base de dados;
+    \item Publicações sem revisão por pares, como teses, dissertações, anais de congressos e pré-prints (a menos que justificadamente relevantes).
+\end{itemize}
+
+\subsection{Busca sistemática em Base de Dados}
+Na pesquisa, as principais bases de dados incluem: a \gls{pubmed}, Elsevier, \gls{cafe} e o Google Acadêmico. Por conseguinte, aplicam-se operadores booleanos em palavras-chave para filtrar os periódicos. As operações são apresentadas na Tabela \ref{tab:operadores_booleanos}.
+
+\begin{table}[h!] 
+    \centering
+    \renewcommand{\arraystretch}{1.5}
+    \caption{Operadores Booleanos para Busca Sistemática}
+    \label{tab:operadores_booleanos}
+    \begin{tabular}{p{6cm} p{9cm}}
+        \hline
+        \multicolumn{1}{c}{\textbf{Consulta}} & \multicolumn{1}{c}{\textbf{Descrição}} \\
+        \hline
+        \texttt{"5G AND telemedicine AND impact"} & Retorna artigos que contenham obrigatoriamente as três palavras-chave. \\
+        \texttt{"5G AND remote healthcare"} & Busca estudos que relacionam 5G e atendimento médico remoto. \\
+        \texttt{"5G AND medical applications"} & Filtra pesquisas sobre aplicações médicas do 5G. \\
+        \texttt{("5G" OR "fifth generation") AND ("telemedicine" OR "e-health")} & Inclui sinônimos para ampliar a busca, considerando tanto "5G" quanto "fifth generation" e "telemedicine" quanto "e-health". \\
+        \texttt{"5G AND (telemedicine OR e-health OR remote monitoring)"} & Retorna estudos que mencionam 5G e pelo menos um dos termos relacionados à telemedicina. \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\break
+
+\subsection{Seleção dos textos acadêmicos}
+
+A triagem de artigos se dá com a leitura de títulos, excluindo aqueles que não têm relevância ao tema; leitura do resumo, e verificando a aderência ao objetivo investigado; e, por fim, leitura do texto completo, incluindo só os conteúdos significativos ao tema.
+
+\subsection{Extração de Dados}
+
+Os artigos selecionados são organizados com o auxílio de ferramentas de software para gerenciar as referências. São elas: Jabref, Mendeley e o Notion. O primeiro tem a função de armazenar os metadados dos periódicos, possibilitando consultas posteriores, e geração de arquivo bibtex para uso em referências bibliográficas do \gls{tcc}; o segundo possui as mesmas funções do Jabref, mas com diferencial de armazenar os próprios textos acadêmicos para possíveis anotações acerca do conteúdo; e, por último, o Notion se torna útil para fazer fichamentos.
+
+Por fim, com a extração de dados mediante leitura e Mineração de Texto (Seção \ref{sec:mineracao}), as informações obtidas serão armazenandas em planilhas no Excel ou Google Sheets para análises posteriores.
+
+\subsection{Síntese de Dados}
+Após a seleção, os textos acadêmicos serão agrupados por categorias. Os grupos serão definidos por afinidade à pergunta proposta, tais como benefícios do 5G para telemedicina, desafios e limitações, e aplicações práticas.
+
+\subsection{Análise crítica}
+Nesta etapa, os artigos são avaliados a fim de verificar a qualidade metodológica. Nesse sentido, deve-se averiguar a força da evidência, verificar a coerência das observações entre os periódicos, e analisar as razões de possíveis inconsistências .
+
+\subsection{Conclusão e Discussões}
+
+Por último, nesta etapa, retorna-se à pergunta inicial para relacionar a pesquisa com o objetivo proposto, além de apontar lacunas na literatura e sugerir temas que podem ser explorados.
+
+\section{Uso da Mineração de Texto}
+\label{sec:mineracao}
+
+A aplicação da mineração de texto tem o objetivo de identificar as N palavras mais frequentes em artigos para compreender tendências na intersecção entre a rede 5G e telemedicina. Nesse ínterim, o método adotado se baseia no processamento de texto e na remoção de palavras irrelevantes, as \textit{stopwords}, utilizando a linguagem Python para criação do código em conjunto com a biblioteca NLTK, usada para \gls{pln}.
+
+Assim, com o uso da ferramenta Excel para organização e visualização dos dados extraídos a partir da mineração de texto, é possível analisar qualitativamente, com a identificação de categoriais, e quantitativamente, com a construção de gráficos e tabelas para reconhecimento de tendências durante a análise da base de dados. 
+
+
+
+% Foram considerados artigos que discutem aspectos como latência, acessibilidade e desafios tecnológicos na aplicação do 5G na saúde. Artigos que não abordavam diretamente a interseção entre o 5G e a telemedicina ou estavam incompletos foram excluídos.
+
+
+    % Ou então figuras podem ser incorporadas de arquivos externos, como é o caso da \autoref{fig-grafico-1}. Se a figura que ser incluída se tratar de um diagrama, um gráfico ou uma ilustração que você mesmo produza, priorize o uso de imagens vetoriais no formato PDF. Com isso, o tamanho do arquivo final do trabalho será menor, e as imagens terão uma apresentação melhor, principalmente quando impressas, uma vez que imagens vetorias são perfeitamente escaláveis para qualquer dimensão. Nesse caso, se for utilizar o Microsoft Excel para produzir gráficos, ou o Microsoft Word para produzir ilustrações, exporte-os como PDF e os incorpore ao documento conforme o exemplo abaixo. No entanto, para manter a coerência no uso de software livre (já que você está usando LaTeX e abnTeX),  teste a ferramenta InkScape\index{InkScape}. ao CorelDraw\index{CorelDraw} ou ao Adobe Illustrator\index{Adobe! Illustrator}.  De todo modo, caso não seja possível  utilizar arquivos de imagens como PDF, utilize qualquer outro formato, como JPEG, GIF, BMP, etc.  Nesse caso, você pode tentar aprimorar as imagens incorporadas com o software livre \index{Gimp}Gimp. Ele é uma alternativa livre ao Adobe Photoshop\index{Adobe! Photoshop}.
+

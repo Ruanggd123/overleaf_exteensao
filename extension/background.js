@@ -187,8 +187,11 @@ async function handleDeltaCompilation(data) {
     }
 
     const pdfBuffer = await response.arrayBuffer();
+    const page = response.headers.get('X-OLC-Page');
+    
     return {
         pdfData: Array.from(new Uint8Array(pdfBuffer)),
+        page: page ? parseInt(page) : null,
         mode: server.mode,
         fallback: server.fallback || usedFallback || false
     };
@@ -224,8 +227,11 @@ async function handleCompilation(projectData) {
         }
 
         const pdfBuffer = await response.arrayBuffer();
+        const page = response.headers.get('X-OLC-Page');
+        
         return {
             pdfData: Array.from(new Uint8Array(pdfBuffer)),
+            page: page ? parseInt(page) : null,
             mode: server.mode,
             fallback: server.fallback || false
         };

@@ -1,0 +1,61 @@
+\changetocdepth {4}
+\babel@toc {brazil}{}\relax 
+\setlength {\cftchapterindent }{\cftlastnumwidth } \setlength {\cftchapternumwidth }{2em}
+\setlength {\cftchapterindent }{\cftlastnumwidth } \setlength {\cftchapternumwidth }{2em}
+\setlength {\cftchapterindent }{\cftlastnumwidth } \setlength {\cftchapternumwidth }{2em}
+\setlength {\cftchapterindent }{0em} \setlength {\cftchapternumwidth }{\cftlastnumwidth }
+\contentsline {chapter}{\chapternumberline {1}\MakeTextUppercase []{Introdução}}{9}{chapter.1}%
+\setlength {\cftchapterindent }{0em} \setlength {\cftchapternumwidth }{\cftlastnumwidth }
+\contentsline {chapter}{\chapternumberline {2}\MakeTextUppercase []{Objetivos}}{11}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Objetivo geral}{11}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Objetivos específicos}{11}{section.2.2}%
+\setlength {\cftchapterindent }{0em} \setlength {\cftchapternumwidth }{\cftlastnumwidth }
+\contentsline {chapter}{\chapternumberline {3}\MakeTextUppercase []{Justificativa}}{12}{chapter.3}%
+\setlength {\cftchapterindent }{0em} \setlength {\cftchapternumwidth }{\cftlastnumwidth }
+\contentsline {chapter}{\chapternumberline {4}\MakeTextUppercase []{Fundamentação Teórica}}{13}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Conceitos Gerais de Aprendizado Federado}{13}{section.4.1}%
+\contentsline {subsection}{\numberline {4.1.1}FedAvg e limitações de segurança}{15}{subsection.4.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}Heterogeneidade de Dados Non-IID}{15}{subsection.4.1.2}%
+\contentsline {section}{\numberline {4.2}Tipos de Ataques em Aprendizado Federado}{16}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Ataques de Envenenamento Poisoning}{16}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}Ataques em ambientes heterogêneos}{18}{subsection.4.2.2}%
+\contentsline {section}{\numberline {4.3}Estratégias de Defesa e Agregação Robusta}{18}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}Métodos clássicos de agregação}{18}{subsection.4.3.1}%
+\contentsline {subsection}{\numberline {4.3.2}Métodos modernos e adaptativos}{19}{subsection.4.3.2}%
+\contentsline {subsection}{\numberline {4.3.3}Abordagens híbridas: \textit {clustering} e minimização de variância}{19}{subsection.4.3.3}%
+\contentsline {subsection}{\numberline {4.3.4}Métricas de avaliação experimental}{20}{subsection.4.3.4}%
+\contentsline {subsection}{\numberline {4.3.5}Análise crítica: impacto da heterogeneidade}{20}{subsection.4.3.5}%
+\setlength {\cftchapterindent }{0em} \setlength {\cftchapternumwidth }{\cftlastnumwidth }
+\contentsline {chapter}{\chapternumberline {5}\MakeTextUppercase []{Metodologia}}{22}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Etapas do Desenvolvimento Experimental}{22}{section.5.1}%
+\contentsline {subsection}{\numberline {5.1.1}Etapa 1: Visão Geral e Preparação}{22}{subsection.5.1.1}%
+\contentsline {subsection}{\numberline {5.1.2}Etapa 2: Conjuntos de Dados e Pré-processamento}{22}{subsection.5.1.2}%
+\contentsline {subsection}{\numberline {5.1.3}MNIST}{22}{subsection.5.1.3}%
+\contentsline {subsection}{\numberline {5.1.4}Fashion-MNIST}{22}{subsection.5.1.4}%
+\contentsline {subsection}{\numberline {5.1.5}Pré-processamento}{23}{subsection.5.1.5}%
+\contentsline {subsection}{\numberline {5.1.6}Etapa 3: Arquitetura da Federação e Hiperparâmetros}{23}{subsection.5.1.6}%
+\contentsline {subsection}{\numberline {5.1.7}Etapa 4: Modelagem da Heterogeneidade (Non-IID)}{23}{subsection.5.1.7}%
+\contentsline {section}{\numberline {5.2}Arquitetura do Modelo Local e Ameaça}{23}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}O Atacante (\textit {Model Poisoning})}{24}{subsection.5.2.1}%
+\contentsline {subsection}{\numberline {5.2.2}Etapa 5: Definição dos Fatores (Agregadores e Ataques)}{24}{subsection.5.2.2}%
+\contentsline {subsection}{\numberline {5.2.3}Fator 1: Defesas Mapeadas}{24}{subsection.5.2.3}%
+\contentsline {subsection}{\numberline {5.2.4}Fator 2: Distorções Manipulativas Empregadas}{25}{subsection.5.2.4}%
+\contentsline {subsection}{\numberline {5.2.5}Etapa 6: Protocolo de Métricas}{25}{subsection.5.2.5}%
+\contentsline {subsection}{\numberline {5.2.6}Etapa 7: Execução e Coleta de Dados (Grid de 777 Testes)}{25}{subsection.5.2.6}%
+\contentsline {subsection}{\numberline {5.2.7}Etapa 8: Validação Estatística (Wilcoxon e Spearman)}{26}{subsection.5.2.7}%
+\setlength {\cftchapterindent }{0em} \setlength {\cftchapternumwidth }{\cftlastnumwidth }
+\contentsline {chapter}{\chapternumberline {6}\MakeTextUppercase []{Resultados e Discussão}}{27}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Desempenho Limpo (\textit {Baseline})}{27}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Robustez sob Ataques: Acurácia e Degradação}{27}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Comportamento Temporal e Convergência}{29}{section.6.3}%
+\contentsline {section}{\numberline {6.4}Acurácia por Tipos de Ataques e Domínios Complexos (Fashion-MNIST)}{30}{section.6.4}%
+\contentsline {section}{\numberline {6.5}Efeito de Fatores e Intensidades}{32}{section.6.5}%
+\contentsline {section}{\numberline {6.6}Síntese da Avaliação Experimental}{32}{section.6.6}%
+\setlength {\cftchapterindent }{\cftlastnumwidth } \setlength {\cftchapternumwidth }{2em}
+\contentsline {chapter}{Apêndices}{33}{chapter*.22}%
+\setlength {\cftchapterindent }{\cftlastnumwidth } \setlength {\cftchapternumwidth }{2em}
+\contentsline {chapter}{Apêndices}{37}{chapter*.35}%
+\setlength {\cftchapterindent }{0em} \setlength {\cftchapternumwidth }{\cftlastnumwidth }
+\contentsline {chapter}{\chapternumberline {7}\MakeTextUppercase []{Conclusão}}{38}{chapter.7}%
+\setlength {\cftchapterindent }{\cftlastnumwidth } \setlength {\cftchapternumwidth }{2em}
+\contentsline {chapter}{\MakeTextUppercase []{REFER\^ENCIAS}}{39}{section*.38}%

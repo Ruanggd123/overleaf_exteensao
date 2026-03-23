@@ -8,23 +8,33 @@ class ProjectSynchronizer {
     constructor(projectId) {
         this.projectId = projectId;
         this.storageKey = `olc_hashes_${projectId}`;
-        this.lastHashes = this._loadHashes();
+        this.lastHashes = {};
+        this.ready = this._loadHashes();
     }
 
-    _loadHashes() {
-        try {
-            return JSON.parse(localStorage.getItem(this.storageKey) || '{}');
-        } catch (e) {
-            return {};
-        }
+    async _loadHashes() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get(this.storageKey, (data) => {
+                this.lastHashes = data[this.storageKey] || {};
+                resolve(this.lastHashes);
+            });
+        });
     }
 
-    _saveHashes(hashes) {
-        localStorage.setItem(this.storageKey, JSON.stringify(hashes));
-        this.lastHashes = hashes;
+    async _saveHashes(hashes) {
+        return new Promise((resolve) => {
+            const data = {};
+            data[this.storageKey] = hashes;
+            chrome.storage.local.set(data, () => {
+                this.lastHashes = hashes;
+                resolve();
+            });
+        });
     }
 
     async createDeltaUpdate(fullZipBlob) {
+        await this.ready; // Ensure hashes are loaded
+        
         const newHashes = {};
         const changedFiles = [];
         const deletedFiles = [];
@@ -60,28 +70,59 @@ class ProjectSynchronizer {
 
         // 4. Save new state
         if (hasChanges) {
-            this._saveHashes(newHashes);
+            await this._saveHashes(newHashes);
             const deltaBlob = await deltaZip.generateAsync({ type: 'blob' });
             return {
                 hasChanges: true,
                 deltaBlob: deltaBlob,
                 deletedFiles: deletedFiles,
-                isFull: false // It's a delta
+                isFull: false 
             };
         }
 
         return { hasChanges: false };
     }
 
+    async createSingleFileDelta(filename, content) {
+        await this.ready;
+
+        // Compute hash of the new content
+        const encoder = new TextEncoder();
+        const buffer = encoder.encode(content);
+        const hash = await this._computeHash(buffer);
+
+        // Check if changed
+        if (this.lastHashes[filename] === hash) {
+            return { hasChanges: false };
+        }
+
+        // Create a delta ZIP with just this one file
+        const deltaZip = new JSZip();
+        deltaZip.file(filename, buffer);
+
+        // Update local hash
+        const newHashes = { ...this.lastHashes };
+        newHashes[filename] = hash;
+        await this._saveHashes(newHashes);
+
+        const deltaBlob = await deltaZip.generateAsync({ type: 'blob' });
+        return {
+            hasChanges: true,
+            deltaBlob: deltaBlob,
+            deletedFiles: [],
+            isFull: false
+        };
+    }
+
     async _computeHash(buffer) {
-        // Simple fast hash (utilizing crypto.subtle)
         const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
     reset() {
-        localStorage.removeItem(this.storageKey);
+        chrome.storage.local.remove(this.storageKey);
         this.lastHashes = {};
+        this.ready = Promise.resolve({});
     }
 }

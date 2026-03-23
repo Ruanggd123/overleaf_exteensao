@@ -111,7 +111,13 @@ class OverleafHybridCompiler {
     _startUIObserver() {
         this.observer = new MutationObserver(() => {
             if (this.contextInvalidated) return;
-            this._tryInjectUI();
+            
+            // Re-check visibility setting before injection
+            chrome.storage.local.get('showExtension', (d) => {
+                if (d.showExtension !== false) {
+                    this._tryInjectUI();
+                }
+            });
         });
         this.observer.observe(document.body, { childList: true, subtree: true });
     }
@@ -727,37 +733,76 @@ class OverleafHybridCompiler {
         let data = null;
 
         try {
-            // 1. Extract Full ZIP (Always do this as baseline for now)
-            data = await this.extractor.extractViaZIP();
+            // 1. Try Instant DOM Extraction (Fastest)
+            const activeData = this.extractor.extractActiveFile();
+            let usedFastSync = false;
 
-            // 2. Incremental Check
-            const delta = await this.synchronizer.createDeltaUpdate(data.blob);
+            if (activeData) {
+                console.log(`[OLC] Fast Sync: Checking ${activeData.filename}...`);
+                const delta = await this.synchronizer.createSingleFileDelta(activeData.filename, activeData.content);
+                
+                if (delta.hasChanges) {
+                    console.log(`[OLC] Fast Sync: File ${activeData.filename} changed. Sending single-file delta.`);
+                    const deltaArray = Array.from(new Uint8Array(await delta.deltaBlob.arrayBuffer()));
+                    payloadData = {
+                        type: 'delta_zip',
+                        blob: deltaArray,
+                        projectId: activeData.projectId,
+                        deletedFiles: [],
+                        line: activeData.line,
+                        filename: activeData.filename
+                    };
+                    action = 'COMPILE_LATEX_DELTA';
+                    usedFastSync = true;
+                } else {
+                    console.log('[OLC] Fast Sync: No changes in active file.');
+                    // Still need to compile to refresh PDF or if other files changed
+                }
+            }
 
-            if (delta.hasChanges) {
-                console.log(`[OLC] Delta Update: ${delta.deletedFiles.length} deleted, sending delta ZIP.`);
-                // Convert delta blob to array buffer
-                const deltaArray = Array.from(new Uint8Array(await delta.deltaBlob.arrayBuffer()));
+            // 2. Fallback to Full Extraction (ZIP) if Fast Sync skipped or no changes detected but compile requested
+            if (!usedFastSync) {
+                console.log('[OLC] Falling back to ZIP extraction (Slow Sync)...');
+                data = await this.extractor.extractViaZIP();
+                await this.synchronizer.ready;
+                
+                const hasExistingHashes = Object.keys(this.synchronizer.lastHashes).length > 0;
+                const delta = await this.synchronizer.createDeltaUpdate(data.blob);
 
-                payloadData = {
-                    type: 'delta_zip',
-                    blob: deltaArray, // Will be chunked if large
-                    projectId: data.projectId,
-                    deletedFiles: delta.deletedFiles
-                };
-                action = 'COMPILE_LATEX_DELTA';
-            } else {
-                console.log('[OLC] No changes detected. Sending empty delta.');
-                const emptyZip = new JSZip();
-                const emptyBlob = await emptyZip.generateAsync({ type: 'blob' });
-                const emptyArray = Array.from(new Uint8Array(await emptyBlob.arrayBuffer()));
-
-                payloadData = {
-                    type: 'delta_zip',
-                    blob: emptyArray,
-                    projectId: data.projectId,
-                    deletedFiles: []
-                };
-                action = 'COMPILE_LATEX_DELTA';
+                if (delta.hasChanges) {
+                    if (!hasExistingHashes) {
+                        console.log('[OLC] Initial sync: No previous hashes. Forcing Full Compile.');
+                        action = 'COMPILE_LATEX';
+                        payloadData = {
+                            type: 'zip',
+                            blob: Array.from(new Uint8Array(await data.blob.arrayBuffer())),
+                            projectId: data.projectId
+                        };
+                    } else {
+                        console.log(`[OLC] Delta Update: ${delta.deletedFiles.length} deleted, sending delta ZIP.`);
+                        const deltaArray = Array.from(new Uint8Array(await delta.deltaBlob.arrayBuffer()));
+                        payloadData = {
+                            type: 'delta_zip',
+                            blob: deltaArray,
+                            projectId: data.projectId,
+                            deletedFiles: delta.deletedFiles
+                        };
+                        action = 'COMPILE_LATEX_DELTA';
+                    }
+                } else {
+                    console.log('[OLC] No changes detected in project.');
+                    // Send empty delta to force recompile on server if needed
+                    const emptyZip = new JSZip();
+                    const emptyBlob = await emptyZip.generateAsync({ type: 'blob' });
+                    const emptyArray = Array.from(new Uint8Array(await emptyBlob.arrayBuffer()));
+                    payloadData = {
+                        type: 'delta_zip',
+                        blob: emptyArray,
+                        projectId: data.projectId || this.extractor.projectId,
+                        deletedFiles: []
+                    };
+                    action = 'COMPILE_LATEX_DELTA';
+                }
             }
 
             // 3. Send to background (Chunked)
@@ -778,7 +823,7 @@ class OverleafHybridCompiler {
 
             // 4. Display
             const pdfBlob = new Blob([new Uint8Array(result.pdfData)], { type: 'application/pdf' });
-            this._displayPdf(pdfBlob);
+            this._displayPdf(pdfBlob, result.page);
 
             const modeIcon = result.mode === 'cloud' ? '☁' : '🖥';
             this._toast(`${modeIcon} Compilado com sucesso!`, 'success');
@@ -806,7 +851,7 @@ class OverleafHybridCompiler {
 
                     // Success handling for retry
                     const pdfBlob = new Blob([new Uint8Array(result.pdfData)], { type: 'application/pdf' });
-                    this._displayPdf(pdfBlob);
+                    this._displayPdf(pdfBlob, result.page);
 
                     const modeIcon = result.mode === 'cloud' ? '☁' : '🖥';
                     this._toast(`${modeIcon} Recuperado com sucesso!`, 'success');
@@ -1035,14 +1080,14 @@ class OverleafHybridCompiler {
 
     // ─── PDF Display ───────────────────────────────────────────
 
-    _displayPdf(blob) {
+    _displayPdf(blob, page = null) {
         if (this.lastPdfUrl) URL.revokeObjectURL(this.lastPdfUrl);
         this.lastPdfBlob = blob;
         const url = URL.createObjectURL(blob);
 
         // #toolbar=0 hides the native chrome PDF toolbar
-        // We also hide navpanes and scrollbar if desired, but focus is toolbar
-        this.lastPdfUrl = `${url}#toolbar=0&navpanes=0`;
+        // page=N focuses on specific page
+        this.lastPdfUrl = `${url}#toolbar=0&navpanes=0${page ? `&page=${page}` : ''}`;
 
         let container = document.getElementById('olc-pdf-container');
         // If in floating mode, we might need to find the body inside
@@ -1071,6 +1116,7 @@ class OverleafHybridCompiler {
     }
 
     _updateVisibility(visible) {
+        console.log(`[OLC] Updating visibility: ${visible}`);
         const banner = document.getElementById('olc-status-banner');
         const float = document.getElementById('olc-floating-controls');
         const container = document.getElementById('olc-pdf-container');
@@ -1080,7 +1126,13 @@ class OverleafHybridCompiler {
         if (float) float.style.display = visible ? 'block' : 'none';
         if (container) container.style.display = visible ? 'flex' : 'none';
 
-        // Toggle Native UI (Reverse logic)
+        // Toggle Buttons (Custom vs Native)
+        const customBtns = document.querySelectorAll('.olc-custom-btn');
+        const nativeBtns = document.querySelectorAll('.olc-native-btn');
+        customBtns.forEach(btn => btn.style.display = visible ? '' : 'none');
+        nativeBtns.forEach(btn => btn.style.display = visible ? 'none' : '');
+
+        // Toggle Native UI Panels (Reverse logic)
         const pdfPanels = document.querySelectorAll('.ui-layout-pane, .pdf');
         let foundPanel = null;
 

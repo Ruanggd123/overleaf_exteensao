@@ -1,0 +1,225 @@
+\providecommand{\abntreprintinfo}[1]{%
+ \citeonline{#1}}
+\setlength{\labelsep}{0pt}\begin{thebibliography}{}
+\providecommand{\abntrefinfo}[3]{}
+\providecommand{\abntbstabout}[1]{}
+\abntbstabout{v-1.9.7 }
+
+\bibitem[Allen-Zhu \textit{et al.} 2020]{Allen2020}
+\abntrefinfo{Allen-Zhu \textit{et al.}}{ALLEN-ZHU \textit{et al.}}{2020}
+{ALLEN-ZHU, Z. \textit{et al.} Sign-flip: Inverting gradients in distributed
+  machine learning.
+\textbf{arXiv preprint}, 2020.}
+
+\bibitem[Almutairi e Barnawi 2024]{Almutairi2024}
+\abntrefinfo{Almutairi e Barnawi}{ALMUTAIRI; BARNAWI}{2024}
+{ALMUTAIRI, S.; BARNAWI, A. A comprehensive analysis of model poisoning attacks
+  in federated learning for autonomous vehicles: A benchmark study.
+\textbf{Results in Engineering}, v.~24, p. 103295, 2024.
+Dispon{\'\i}vel em:
+  \url{https://www.sciencedirect.com/science/article/pii/S2590123024015494}.}
+
+\bibitem[Bhagoji \textit{et al.} 2019]{Bhagoji2019}
+\abntrefinfo{Bhagoji \textit{et al.}}{BHAGOJI \textit{et al.}}{2019}
+{BHAGOJI, A.~N.; CHAKRABORTY, S.; MITTAL, P.; CALO, S. Analyzing federated
+  learning through an adversarial lens. In:  PMLR. \textbf{Proceedings of the
+  36th International Conference on Machine Learning}. 2019. p. 634--643.
+  Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/1811.03728.pdf}.}
+
+\bibitem[Bharati \textit{et al.} 2022]{Bharati2022}
+\abntrefinfo{Bharati \textit{et al.}}{BHARATI \textit{et al.}}{2022}
+{BHARATI, S.; MONDAL, M. R.~H.; PODDER, P.; PRASATH, V.~S. Federated learning:
+  {A}pplications, challenges and future directions.
+\textbf{International Journal of Hybrid Intelligent Systems}, v.~18, n.~1--2,
+  p. 19--35, 2022.
+Dispon{\'\i}vel em:
+  \url{https://content.iospress.com/articles/international-journal-of-hybrid-intelligent-systems/his220006}.}
+
+\bibitem[Biggio \textit{et al.} 2012]{Biggio2012}
+\abntrefinfo{Biggio \textit{et al.}}{BIGGIO \textit{et al.}}{2012}
+{BIGGIO, B.; NELSON, B.; LASKOV, P. Poisoning attacks against support vector
+  machines. In:  \textbf{Proceedings of the 29th International Conference on
+  Machine Learning}. [\textit{S. n.}], 2012. p. 1467--1474. Dispon{\'\i}vel em:
+  \url{https://arxiv.org/pdf/1206.6389.pdf}.}
+
+\bibitem[Blanchard \textit{et al.} 2017]{Blanchard2017}
+\abntrefinfo{Blanchard \textit{et al.}}{BLANCHARD \textit{et al.}}{2017}
+{BLANCHARD, P.; MHAMDI, E.~M. E.; GUERRAOUI, R.; STAINER, J. Machine learning
+  with adversaries: {B}yzantine tolerant gradient descent. In:
+  \textbf{Advances in Neural Information Processing Systems}. [\textit{S. n.}],
+  2017. v.~30, p. 119--129. Dispon{\'\i}vel em:
+  \url{https://arxiv.org/pdf/1703.02757.pdf}.}
+
+\bibitem[Chen \textit{et al.} 2023]{Chen2023}
+\abntrefinfo{Chen \textit{et al.}}{CHEN \textit{et al.}}{2023}
+{CHEN, H.; CHEN, X.; PENG, L.; MA, R. {FLRAM}: {R}obust aggregation technique
+  for defense against {B}yzantine poisoning attacks in federated learning.
+\textbf{Electronics}, v.~12, n.~21, p.~4463, 2023.
+Dispon{\'\i}vel em: \url{https://www.mdpi.com/2079-9292/12/21/4463/pdf}.}
+
+\bibitem[Fang \textit{et al.} 2025]{Fang2025}
+\abntrefinfo{Fang \textit{et al.}}{FANG \textit{et al.}}{2025}
+{FANG, M.; NABAVIRAZAVI, S.; LIU, Z.; SUN, W.; IYENGAR, S.~S.; YANG, H.
+  \textbf{Do we really need to design new {B}yzantine-robust aggregation
+  rules?} 2025.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/2501.17381.pdf}.}
+
+\bibitem[Hsu \textit{et al.} 2019]{Hsu2019}
+\abntrefinfo{Hsu \textit{et al.}}{HSU \textit{et al.}}{2019}
+{HSU, T.-M.~H.; QI, H.; BROWN, M. Measuring the effects of non-identical data
+  distribution for federated visual classification.
+\textbf{arXiv preprint arXiv:1909.06335}, 2019.}
+
+\bibitem[Kairouz \textit{et al.} 2021]{Kairouz2021}
+\abntrefinfo{Kairouz \textit{et al.}}{KAIROUZ \textit{et al.}}{2021}
+{KAIROUZ, P.; MCMAHAN, H.~B. \textit{et al.} \textbf{Advances and open problems
+  in federated learning}. 2021.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/1912.04977.pdf}.}
+
+\bibitem[Khan \textit{et al.} 2023]{Khan2023}
+\abntrefinfo{Khan \textit{et al.}}{KHAN \textit{et al.}}{2023}
+{KHAN, M.~A.; SHEJWALKAR, V.; HOUMANSADR, A.; ANWAR, F.~M. On the pitfalls of
+  security evaluation of robust federated learning. In:  \textbf{2023 IEEE
+  Security and Privacy Workshops (SPW)}. [\textit{S. n.}], 2023. p. 57--68.
+  Dispon{\'\i}vel em:
+  \url{https://people.cs.umass.edu/~amir/papers/DLSP23-defenses.pdf}.}
+
+\bibitem[LeCun \textit{et al.} 1998]{LeCun1998}
+\abntrefinfo{LeCun \textit{et al.}}{LECUN \textit{et al.}}{1998}
+{LECUN, Y.; BOTTOU, L.; BENGIO, Y.; HAFFNER, P. Gradient-based learning applied
+  to document recognition.
+\textbf{Proceedings of the IEEE}, IEEE, v.~86, n.~11, p. 2278--2324, 1998.}
+
+\bibitem[Li \textit{et al.} 2020]{Li2020}
+\abntrefinfo{Li \textit{et al.}}{LI \textit{et al.}}{2020}
+{LI, T.; SAHU, A.~K.; TALWALKAR, A.; SMITH, V. Federated learning:
+  {C}hallenges, methods, and future directions.
+\textbf{IEEE Signal Processing Magazine}, IEEE, v.~37, n.~3, p. 50--60, 2020.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/1908.07873.pdf}.}
+
+\bibitem[Li \textit{et al.} 2023]{Li2023}
+\abntrefinfo{Li \textit{et al.}}{LI \textit{et al.}}{2023}
+{LI, Y.; YUAN, D.; SANI, A.~S.; BAO, W. Enhancing federated learning robustness
+  in adversarial environment through clustering non-{IID} features.
+\textbf{Computers \& Security}, v.~132, p. 103319, 2023.
+Dispon{\'\i}vel em:
+  \url{https://www.sciencedirect.com/science/article/pii/S0167404823002298}.}
+
+\bibitem[Liang \textit{et al.} 2023]{Liang2023}
+\abntrefinfo{Liang \textit{et al.}}{LIANG \textit{et al.}}{2023}
+{LIANG, J.; WANG, R.; FENG, C.; CHANG, C.-C. A survey on federated learning
+  poisoning attacks and defenses.
+\textbf{arXiv preprint arXiv:2306.03397}, 2023.
+Dispon{\'\i}vel em: \url{https://arxiv.org/abs/2306.03397}.}
+
+\bibitem[Lyu \textit{et al.} 2020]{Lyu2020}
+\abntrefinfo{Lyu \textit{et al.}}{LYU \textit{et al.}}{2020}
+{LYU, L.; YU, H.; YANG, Q. \textbf{Threats to federated learning: a survey}.
+  2020.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/2003.02133.pdf}.}
+
+\bibitem[McMahan \textit{et al.} 2017]{McMahan2017}
+\abntrefinfo{McMahan \textit{et al.}}{MCMAHAN \textit{et al.}}{2017}
+{MCMAHAN, B.; MOORE, E.; RAMAGE, D.; HAMPSON, S.; ARCAS, B. Aguera~y.
+  Communication-efficient learning of deep networks from decentralized data.
+  In:  PMLR. \textbf{Proceedings of the 20th International Conference on
+  Artificial Intelligence and Statistics}. 2017. p. 1273--1282. Dispon{\'\i}vel
+  em: \url{https://arxiv.org/pdf/1602.05629.pdf}.}
+
+\bibitem[Montgomery 2017]{Montgomery2017}
+\abntrefinfo{Montgomery}{MONTGOMERY}{2017}
+{MONTGOMERY, D.~C. \textbf{Design and analysis of experiments}. [\textit{S.
+  l.}]: John Wiley \& Sons, 2017.}
+
+\bibitem[Moshawrab \textit{et al.} 2023]{Moshawrab2023}
+\abntrefinfo{Moshawrab \textit{et al.}}{MOSHAWRAB \textit{et al.}}{2023}
+{MOSHAWRAB, M.; ADDA, M.; BOUZOUANE, A.; IBRAHIM, H.; RAAD, A. Reviewing
+  federated learning aggregation algorithms; strategies, contributions,
+  limitations and future perspectives.
+\textbf{Electronics}, v.~12, n.~10, p.~2287, 2023.
+Dispon{\'\i}vel em: \url{https://www.mdpi.com/2079-9292/12/10/2287/pdf}.}
+
+\bibitem[Mothukuri \textit{et al.} 2021]{Mothukuri2021}
+\abntrefinfo{Mothukuri \textit{et al.}}{MOTHUKURI \textit{et al.}}{2021}
+{MOTHUKURI, V.; PARIZI, R.~M.; POURIYEH, S.; HUANG, Y.; DEHGHANTANHA, A.;
+  SRIVASTAVA, G. A survey on security and privacy of federated learning.
+\textbf{Future Generation Computer Systems}, Elsevier, v.~115, p. 619--640,
+  2021.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/2107.01831.pdf}.}
+
+\bibitem[Sagar \textit{et al.} 2023]{Sagar2023}
+\abntrefinfo{Sagar \textit{et al.}}{SAGAR \textit{et al.}}{2023}
+{SAGAR, S.; LI, C.-S.; LOKE, S.~W.; CHOI, J. Poisoning attacks and defenses in
+  federated learning: A survey.
+\textbf{arXiv preprint arXiv:2301.05795}, 2023.
+Dispon{\'\i}vel em: \url{https://arxiv.org/abs/2301.05795}.}
+
+\bibitem[Shejwalkar e Houmansadr 2021]{Shejwalkar2021}
+\abntrefinfo{Shejwalkar e Houmansadr}{SHEJWALKAR; HOUMANSADR}{2021}
+{SHEJWALKAR, V.; HOUMANSADR, A. Manipulating the byzantine: Optimizing model
+  poisoning attacks and defenses for federated learning. In:  \textbf{NDSS}.
+  [\textit{S. l.}: \textit{s. n.}], 2021.}
+
+\bibitem[Sikandar \textit{et al.} 2023]{Sikandar2023}
+\abntrefinfo{Sikandar \textit{et al.}}{SIKANDAR \textit{et al.}}{2023}
+{SIKANDAR, H.~S.; WAHEED, H.; TAHIR, S.; MALIK, S.~U.; RAFIQUE, W. A detailed
+  survey on federated learning attacks and defenses.
+\textbf{Electronics}, v.~12, n.~2, p.~260, 2023.
+Dispon{\'\i}vel em: \url{https://www.mdpi.com/2079-9292/12/2/260/pdf}.}
+
+\bibitem[Tolpegin \textit{et al.} 2020]{Tolpegin2020}
+\abntrefinfo{Tolpegin \textit{et al.}}{TOLPEGIN \textit{et al.}}{2020}
+{TOLPEGIN, V.; TRUEX, S.; GURSOY, M.~E.; LIU, L. Data poisoning attacks against
+  federated learning systems. In:  \textbf{Computer Security - ESORICS 2020}.
+  Springer, 2020. p. 480--501. Dispon{\'\i}vel em:
+  \url{https://arxiv.org/pdf/2011.14861.pdf}.}
+
+\bibitem[Xiao \textit{et al.} 2017]{Xiao2017}
+\abntrefinfo{Xiao \textit{et al.}}{XIAO \textit{et al.}}{2017}
+{XIAO, H.; RASUL, K.; VOLLGRAF, R. Fashion-mnist: a novel image dataset for
+  benchmarking machine learning algorithms.
+\textbf{arXiv preprint arXiv:1708.07747}, 2017.}
+
+\bibitem[Xu e Shu 2024]{Xu2024}
+\abntrefinfo{Xu e Shu}{XU; SHU}{2024}
+{XU, H.; SHU, T. Defending against model poisoning attack in federated
+  learning: {A} variance-minimization approach.
+\textbf{Journal of Information Security and Applications}, v.~82, p. 103744,
+  2024.
+Dispon{\'\i}vel em:
+  \url{https://www.sciencedirect.com/science/article/pii/S2214212624000474}.}
+
+\bibitem[Yang \textit{et al.} 2019]{Yang2019}
+\abntrefinfo{Yang \textit{et al.}}{YANG \textit{et al.}}{2019}
+{YANG, Q.; LIU, Y.; CHEN, T.; TONG, Y. \textbf{Federated machine learning:
+  {C}oncept and applications}. 2019.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/1902.04885.pdf}.}
+
+\bibitem[Yin \textit{et al.} 2018]{Yin2018}
+\abntrefinfo{Yin \textit{et al.}}{YIN \textit{et al.}}{2018}
+{YIN, D.; CHEN, Y.; KANNAN, R.; BARTLETT, P.~L. Byzantine-robust distributed
+  learning: towards optimal statistical rates. In:  PMLR. \textbf{Proceedings
+  of the 35th International Conference on Machine Learning}. 2018. p.
+  5650--5659. Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/1803.01498.pdf}.}
+
+\bibitem[Zhang \textit{et al.} 2021]{Zhang2021}
+\abntrefinfo{Zhang \textit{et al.}}{ZHANG \textit{et al.}}{2021}
+{ZHANG, C.; XIE, Y.; BAI, H.; YU, B.; LI, W.; GAO, Y. A survey on federated
+  learning.
+\textbf{Knowledge-Based Systems}, Elsevier, v.~216, p. 106775, 2021.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/2104.14881.pdf}.}
+
+\bibitem[Zhang \textit{et al.} 2025]{Zhang2025}
+\abntrefinfo{Zhang \textit{et al.}}{ZHANG \textit{et al.}}{2025}
+{ZHANG, X.; LUO, Y.; LI, T. A review of research on secure aggregation for
+  federated learning.
+\textbf{Future Internet}, v.~17, n.~7, p.~308, 2025.
+Dispon{\'\i}vel em: \url{https://www.mdpi.com/1999-5903/17/7/308/pdf}.}
+
+\bibitem[Zhao \textit{et al.} 2018]{Zhao2018}
+\abntrefinfo{Zhao \textit{et al.}}{ZHAO \textit{et al.}}{2018}
+{ZHAO, Y.; LI, M.; LAI, L.; SUDA, N.; CIVIN, D.; CHANDRA, V. \textbf{Federated
+  learning with non-{IID} data}. 2018.
+Dispon{\'\i}vel em: \url{https://arxiv.org/pdf/1806.00582.pdf}.}
+
+\end{thebibliography}

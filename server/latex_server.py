@@ -24,7 +24,10 @@ import zipfile
 import subprocess
 import traceback
 import json
+import re
+import base64
 from pathlib import Path
+import time
 from functools import wraps
 
 from flask import Flask, request, send_file, jsonify, render_template_string
@@ -53,11 +56,12 @@ CORS(app, resources={
 # Limitar tamanho do upload
 app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE * 1024 * 1024
 
-# Cache para projetos (para compilação delta)
-project_cache = {}  # projectId -> {files, timestamp}
+# Cache para projetos (projectId -> {directory, main_file, timestamp})
+project_cache = {}
 
-# Cache para projetos (para compilação delta)
-project_cache = {}  # projectId -> {files, timestamp}
+# Pasta para armazenar projetos (persistente para suportar compilação delta)
+PROJECTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'projects')
+os.makedirs(PROJECTS_DIR, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════════════
 #  Security & Error Handling
@@ -140,8 +144,9 @@ def compile_project(directory, main_file, engine=None, project_id=None):
     work_dir = os.path.dirname(main_path) or directory
     main_basename = os.path.basename(main_file)
     
+    # Adicionar SyncTeX para suporte a scroll/foco
     base_cmd = [engine, '-interaction=nonstopmode', '-file-line-error',
-                '-enable-installer', main_basename]
+                '-synctex=1', '-enable-installer', main_basename]
     
     env = os.environ.copy()
     env['MIKTEX_ENABLEINSTALLER'] = 't'
@@ -210,6 +215,37 @@ def compile_project(directory, main_file, engine=None, project_id=None):
         return {'success': False, 'log': f'Timeout ({COMPILE_TIMEOUT}s) expirado.'}
     except Exception as e:
         return {'success': False, 'log': f'Erro: {str(e)}'}
+
+
+def synctex_lookup(project_dir, main_file, line, target_file=None):
+    """
+    Usa o utilitário synctex para encontrar a página correspondente a uma linha.
+    """
+    if not line:
+        return None
+        
+    pdf_path = main_file.replace('.tex', '.pdf')
+    full_pdf_path = os.path.join(project_dir, pdf_path)
+    
+    if not os.path.exists(full_pdf_path):
+        return None
+        
+    # Se target_file não for fornecido, usa o main_file
+    target_rel = target_file if target_file else os.path.basename(main_file)
+    
+    # Comando: synctex view -i <line>:<col>:<file> -o <pdf>
+    cmd = ['synctex', 'view', '-i', f'{line}:1:{target_rel}', '-o', pdf_path]
+    
+    try:
+        result = subprocess.run(cmd, cwd=project_dir, capture_output=True, text=True, timeout=5)
+        # O output do synctex contém "Page:N"
+        match = re.search(r'Page:(\d+)', result.stdout)
+        if match:
+            return int(match.group(1))
+    except Exception as e:
+        print(f'[SyncTeX] Erro no lookup: {e}')
+        
+    return None
 
 # ═══════════════════════════════════════════════════════════════════
 #  PDF to Word Conversion
@@ -329,6 +365,31 @@ LANDING_PAGE = """
 </html>
 """
 
+def ensure_project_in_cache(project_id):
+    """
+    Garante que o projeto está no cache de memória.
+    Se não estiver, tenta reidratar a partir do PROJECTS_DIR.
+    """
+    if not project_id:
+        return None
+        
+    if project_id in project_cache:
+        project_cache[project_id]['timestamp'] = time.time()
+        return project_cache[project_id]
+        
+    project_dir = os.path.join(PROJECTS_DIR, project_id)
+    if os.path.exists(project_dir):
+        print(f'[Cache] Reidratando projeto {project_id}...')
+        main_file = find_main_file(project_dir)
+        project_cache[project_id] = {
+            'directory': project_dir,
+            'main_file': main_file,
+            'timestamp': time.time()
+        }
+        return project_cache[project_id]
+        
+    return None
+
 @app.route('/')
 def index():
     """Página inicial com status."""
@@ -361,8 +422,27 @@ def compile_latex():
     if not files:
         return jsonify({'error': 'Nenhum arquivo recebido.'}), 400
     
-    # Usar diretório temporário em /tmp (escrita permitida em Cloud Run)
-    with tempfile.TemporaryDirectory(dir='/tmp', prefix='olc_') as work_dir:
+    # Se project_id for fornecido, usar pasta persistente. Caso contrário, temp.
+    if project_id:
+        # Reidratar cache se necessário
+        cache_info = ensure_project_in_cache(project_id)
+        if cache_info:
+            work_dir = cache_info['directory']
+            main_file = cache_info['main_file'] # Use main_file from cache if available
+            # Clear existing content for a full compile, unless it's a delta
+            shutil.rmtree(work_dir, ignore_errors=True)
+            os.makedirs(work_dir, exist_ok=True)
+        else:
+            # Novo projeto ou diretório removido
+            work_dir = os.path.join(PROJECTS_DIR, project_id)
+            os.makedirs(work_dir, exist_ok=True)
+            # main_file is already set from request, or default 'main.tex'
+    else:
+        # Fallback para temp se não houver ID (delta não funcionará)
+        tmp_parent = tempfile.mkdtemp(dir='/tmp', prefix='olc_')
+        work_dir = tmp_parent
+        
+    try:
         # Escrever arquivos
         for filename, content in files.items():
             filepath = os.path.join(work_dir, filename)
@@ -370,6 +450,13 @@ def compile_latex():
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
         
+        if project_id:
+            project_cache[project_id] = {
+                'directory': work_dir,
+                'main_file': main_file,
+                'timestamp': time.time()
+            }
+            
         result = compile_project(work_dir, main_file, engine, project_id)
         
         if result['success']:
@@ -382,16 +469,19 @@ def compile_latex():
                 as_attachment=True,
                 download_name='output.pdf'
             )
-            
-            # Adicionar headers CORS
             response.headers['Access-Control-Allow-Origin'] = '*'
             return response
         else:
             return jsonify({
                 'error': 'Compilação falhou.',
-                'log': result['log'][-5000:],  # Aumentado para cloud
-                'public_url': result.get('public_url')
+                'log': result['log'][-5000:]
             }), 500
+    except Exception as e:
+        return jsonify({'error': f'Erro ao processar JSON: {str(e)}'}), 500
+    finally:
+        # Se NÃO for persistente, limpar
+        if not project_id and 'tmp_parent' in locals():
+            shutil.rmtree(tmp_parent, ignore_errors=True)
 
 @app.route('/compile-zip', methods=['POST'])
 def compile_zip():
@@ -404,21 +494,42 @@ def compile_zip():
     engine = request.form.get('engine', DEFAULT_ENGINE)
     project_id = request.form.get('projectId')
     
-    with tempfile.TemporaryDirectory(dir='/tmp', prefix='olc_zip_') as tmp_dir:
-        extract_dir = os.path.join(tmp_dir, 'project')
-        os.makedirs(extract_dir, exist_ok=True)
+    # Gerar ID se não for fornecido
+    if not project_id:
+        import uuid
+        project_id = str(uuid.uuid4())
+    
+    # Reidratar cache se necessário
+    cache_info = ensure_project_in_cache(project_id)
+    if cache_info:
+        project_dir = cache_info['directory']
+        # Clear existing content for a full compile
+        shutil.rmtree(project_dir, ignore_errors=True)
+        os.makedirs(project_dir, exist_ok=True)
+    else:
+        project_dir = os.path.join(PROJECTS_DIR, project_id)
+        # Ensure directory is clean if it existed but wasn't in cache
+        if os.path.exists(project_dir):
+            shutil.rmtree(project_dir)
+        os.makedirs(project_dir, exist_ok=True)
+    
+    try:
+        with zipfile.ZipFile(zip_file, 'r') as z:
+            z.extractall(project_dir)
         
-        try:
-            with zipfile.ZipFile(zip_file, 'r') as z:
-                z.extractall(extract_dir)
-        except zipfile.BadZipFile:
-            return jsonify({'error': 'Arquivo ZIP inválido.'}), 400
-        
-        main_file = find_main_file(extract_dir)
+        main_file = find_main_file(project_dir)
         if not main_file:
             return jsonify({'error': 'Nenhum arquivo .tex encontrado no ZIP.'}), 400
         
-        result = compile_project(extract_dir, main_file, engine, project_id)
+        # Atualizar cache ANTES da compilação para suportar deltas subsequentes
+        import time
+        project_cache[project_id] = {
+            'directory': project_dir,
+            'main_file': main_file,
+            'timestamp': time.time()
+        }
+        
+        result = compile_project(project_dir, main_file, engine, project_id)
         
         if result['success']:
             with open(result['pdf_path'], 'rb') as f:
@@ -435,16 +546,17 @@ def compile_zip():
         else:
             return jsonify({
                 'error': 'Compilação falhou.',
-                'log': result['log'][-5000:],
-                'public_url': result.get('public_url')
+                'log': result['log'][-5000:]
             }), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Erro ao processar ZIP: {str(e)}'}), 500
 
 @app.route('/compile-delta', methods=['POST'])
 def compile_delta():
     """
     Compilação incremental: aplica mudanças (delta) a um projeto existente.
     """
-    
     if 'delta_zip' not in request.files:
         return jsonify({'error': 'Nenhum delta ZIP recebido.'}), 400
     
@@ -456,39 +568,41 @@ def compile_delta():
     if not project_id:
         return jsonify({'error': 'projectId é obrigatório para compilação delta.'}), 400
     
-    # Verificar se temos o projeto em cache
-    if project_id not in project_cache:
-        return jsonify({'error': 'CACHE_MISS', 'message': 'Projeto não encontrado no cache.'}), 410
+    # Reidratar cache se necessário
+    cache_info = ensure_project_in_cache(project_id)
+    if not cache_info:
+        return jsonify({'error': 'CACHE_MISS', 'message': 'Projeto não encontrado no cache nem no disco.'}), 410
     
-    cache_info = project_cache[project_id]
     project_dir = cache_info['directory']
     
-    # Verificar se diretório ainda existe
+    # Verificar se diretório ainda existe (redundante mas seguro)
     if not os.path.exists(project_dir):
-        del project_cache[project_id]
+        if project_id in project_cache: del project_cache[project_id]
         return jsonify({'error': 'CACHE_MISS', 'message': 'Diretório de cache não existe mais.'}), 410
+    
+    import time
+    project_cache[project_id]['timestamp'] = time.time()
     
     try:
         # Aplicar deleções
         for filepath in deleted_files:
             full_path = os.path.join(project_dir, filepath)
             if os.path.exists(full_path):
-                os.remove(full_path)
+                if os.path.isfile(full_path):
+                    os.remove(full_path)
+                elif os.path.isdir(full_path):
+                    shutil.rmtree(full_path)
                 print(f'[Delta] Deletado: {filepath}')
         
         # Aplicar atualizações do delta
         with zipfile.ZipFile(delta_file, 'r') as z:
             z.extractall(project_dir)
         
-        # Recompilar
+        # Encontrar arquivo principal se não estiver no cache
         main_file = cache_info.get('main_file') or find_main_file(project_dir)
         if not main_file:
             return jsonify({'error': 'Nenhum arquivo .tex encontrado.'}), 400
-        
-        # Atualizar cache
-        project_cache[project_id]['main_file'] = main_file
-        project_cache[project_id]['timestamp'] = os.time()
-        
+            
         result = compile_project(project_dir, main_file, engine, project_id)
         
         if result['success']:

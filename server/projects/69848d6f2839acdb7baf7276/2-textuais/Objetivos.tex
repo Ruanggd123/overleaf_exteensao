@@ -1,0 +1,18 @@
+\chapter{Objetivos}
+\label{cap:objetivos}
+
+\section{Objetivo geral}
+
+Analisar comparativamente algoritmos de agregação robusta em \gls{fl}, avaliando sua eficácia e suas vulnerabilidades sob ataques de envenenamento e diferentes níveis de heterogeneidade dos dados, a fim de identificar limites de robustez e fornecer diretrizes de seleção de agregadores em cenários federados seguros.
+
+\section{Objetivos específicos}
+
+\begin{itemize}
+    \item Implementar um ambiente de simulação de \gls{fl} reprodutível, com 100 clientes simulados e participação de 10\% dos clientes por rodada (\(\approx 10\) clientes), com controle de \emph{seeds} e registro sistemático dos resultados.
+
+    \item Implementar e padronizar os agregadores FedAvg (\emph{baseline}), Krum, \emph{Trimmed Mean}, \emph{Coordinate-wise Median}, MinVar, FLRAM e Mini-FL, assegurando consistência de arquitetura, hiperparâmetros e protocolo de execução.
+
+    \item Conduzir a avaliação dos agregadores em MNIST e Fashion-MNIST sob heterogeneidade \gls{noniid} controlada por particionamento \emph{Dirichlet} (com \(\alpha \in \{1{,}0;\,0{,}5;\,0{,}1\}\)), analisando o desempenho em função de diferentes frações de clientes maliciosos e de ataques de envenenamento especificados no estudo.
+
+    \item Realizar estudos de ablação para quantificar a influência de parâmetros-chave (heterogeneidade \gls{noniid}, fração de clientes maliciosos, épocas locais e hiperparâmetros dos agregadores) e mapear \emph{trade-offs} entre robustez a ataques, desempenho em dados heterogêneos e custo computacional.
+\end{itemize}

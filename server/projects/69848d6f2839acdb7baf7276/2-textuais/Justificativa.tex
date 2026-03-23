@@ -1,0 +1,10 @@
+\chapter{Justificativa}
+\label{chap:justificativa}
+
+O \gls{fl} tem se consolidado como uma alternativa para treinamento colaborativo sem centralização dos dados, sendo relevante em contextos com restrições de privacidade e limitações de comunicação \cite{Kairouz2021,Li2020,Yang2019}. Entretanto, sua arquitetura distribuída amplia desafios de segurança, pois o servidor agrega atualizações provenientes de múltiplos participantes sem acesso aos dados originais \cite{Sikandar2023,Mothukuri2021,Lyu2020}.
+
+Em cenários adversos, clientes maliciosos podem executar ataques de envenenamento (\textit{poisoning}) ao manipular dados locais ou ao alterar as atualizações do modelo enviadas ao servidor, com o objetivo de degradar o desempenho global ou introduzir comportamentos indesejados \cite{Biggio2012,Bhagoji2019}.
+
+Além disso, em aplicações realistas, os dados dos clientes frequentemente apresentam heterogeneidade estatística (\gls{noniid}), o que pode degradar a convergência e dificultar a distinção entre variações legítimas e comportamento malicioso \cite{Zhao2018,Li2020}. Para mitigar esses riscos, foram propostos algoritmos de agregação robusta, incluindo métodos clássicos e abordagens recentes com mecanismos adaptativos, ponderação e/ou agrupamento de atualizações \cite{Blanchard2017,Yin2018}. Ainda assim, a literatura aponta limitações na avaliação de robustez em \gls{fl}, reforçando a necessidade de protocolos experimentais mais rigorosos e comparáveis \cite{Khan2023,Kairouz2021}.
+
+Diante disso, este trabalho se justifica por conduzir uma avaliação comparativa, controlada e reprodutível de algoritmos de agregação robusta em \gls{fl} sob cenários adversos, considerando ataques de envenenamento e diferentes níveis de heterogeneidade \gls{noniid}. Como contribuição, espera-se identificar limites práticos de robustez, evidenciar vulnerabilidades sob diferentes condições experimentais e fornecer diretrizes para seleção de agregadores em aplicações que demandem maior segurança e confiabilidade \cite{Khan2023,Sikandar2023,Zhang2025}.
